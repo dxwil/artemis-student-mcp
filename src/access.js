@@ -268,7 +268,7 @@ function ensureWithin(dir) {
   return path.resolve(dir);
 }
 
-function withStateLock(stateDir, fn) {
+export function withStateLock(stateDir, fn) {
   const directory = ensureStateDir(stateDir);
   const lockPath = path.join(directory, ".lock");
   const started = Date.now();
