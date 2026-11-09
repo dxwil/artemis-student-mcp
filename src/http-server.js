@@ -3,9 +3,10 @@ import http from "node:http";
 import { envForAccount, ensureStateDir, resolveStateDir } from "./access.js";
 import { SafeError } from "./errors.js";
 import { MAX_BYTES } from "./http.js";
+import { createDownloadDesk } from "./download-desk.js";
 import { createToolImpl } from "./impl.js";
 import { createMcpHandler, SUPPORTED_PROTOCOL_VERSIONS } from "./mcp.js";
-import { authenticateBearer, createOAuthRuntime, oauthSessionLive, revokeOAuthGrant, routeOAuth, wwwAuthenticate } from "./oauth.js";
+import { authenticateBearer, createOAuthRuntime, oauthSessionLive, publicBaseUrl, revokeOAuthGrant, routeOAuth, wwwAuthenticate } from "./oauth.js";
 
 export { MAX_BYTES as MAX_HTTP_BODY_BYTES };
 export const DEFAULT_AUTH_FAILURE_LIMIT = 30;
@@ -67,8 +68,9 @@ export async function startHttpServer(options = {}) {
   const tails = new Map();
   const limiter = createLimiter(config.authFailureLimit, config.authFailureWindowMs);
   const oauth = createOAuthRuntime(options);
+  const downloads = createDownloadDesk();
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, { config, sessions, tails, limiter, oauth, server }).catch(() => {
+    handleRequest(req, res, { config, sessions, tails, limiter, oauth, downloads, server }).catch(() => {
       if (!res.headersSent) {
         try {
           finish(req, res, 500, { error: "internal" }, { close: true });
@@ -95,7 +97,7 @@ async function handleRequest(req, res, ctx) {
     return;
   }
   const pathname = url.pathname === "/mcp/" ? "/mcp" : url.pathname;
-  const safePath = KNOWN_PATHS.has(pathname) ? pathname : "/";
+  const safePath = pathname.startsWith("/files/") ? "/files" : KNOWN_PATHS.has(pathname) ? pathname : "/";
   const reply = (status, payload, extra) => {
     finish(req, res, status, payload, extra);
     config.log(`${status} ${safePath}\n`);
@@ -122,6 +124,22 @@ async function handleRequest(req, res, ctx) {
       return;
     }
     reply(400, { error: "query_rejected" }, { close: true });
+    return;
+  }
+  const fileToken = pathname.startsWith("/files/") ? pathname.slice("/files/".length) : null;
+  if (fileToken != null) {
+    if (req.method !== "GET" || url.search) {
+      reply(fileToken && !url.search ? 405 : 400, { error: url.search ? "query_rejected" : "method_not_allowed" }, { close: true });
+      return;
+    }
+    req.resume();
+    const served = ctx.downloads.take(fileToken);
+    if (!served) {
+      reply(404, { error: "not_found" }, { close: true });
+      return;
+    }
+    sendDownload(res, served);
+    config.log(`200 ${safePath}\n`);
     return;
   }
   if (pathname === "/healthz") {
@@ -382,7 +400,17 @@ function openSession(ctx, userId) {
   const session = {
     id: crypto.randomBytes(32).toString("hex"),
     userId,
-    handler: createMcpHandler(createToolImpl(accountEnv, ctx.config.fetchImpl)),
+    handler: createMcpHandler(createToolImpl(accountEnv, ctx.config.fetchImpl, {
+      publishDownload(file) {
+        return ctx.downloads.issue({
+          userId,
+          filePath: file.absolutePath,
+          filename: file.filename,
+          mimeType: file.mimeType,
+          base: publicBaseUrl(ctx.config, listenPort(ctx.server)),
+        });
+      },
+    })),
     lastUsed: Date.now(),
   };
   ctx.sessions.set(session.id, session);
@@ -433,6 +461,18 @@ function finish(req, res, status, payload, extra = {}) {
   if (extra.close) {
     res.on("finish", () => req.destroy());
   }
+}
+
+function sendDownload(res, served) {
+  const filename = /^[A-Za-z0-9._-]{1,120}$/.test(served.filename) ? served.filename : "attachment";
+  res.writeHead(200, {
+    "Content-Type": served.mimeType || "application/octet-stream",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Content-Length": String(served.bytes.length),
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  res.end(served.bytes);
 }
 
 function baseHeaders() {

@@ -70,7 +70,7 @@ const LIST_LECTURES = {
 const GET_LECTURE = {
   name: "get_lecture",
   description:
-    "Read one lecture and student-visible material references. Materials are metadata and text or links, not downloaded files. Hidden units are omitted. Read-only. Does not mark units complete.",
+    "Read one lecture and student-visible materials. Attachment materials include unitId, attachmentId, filename, and a same-origin path when Artemis stores the file. Pass unitId to download_attachment. Hidden units are omitted. Read-only. Does not mark units complete.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -159,12 +159,12 @@ const LIST_MESSAGES = {
 const DOWNLOAD_ATTACHMENT = {
   name: "download_attachment",
   description:
-    "Download one same-origin lecture attachment path into the plugin data directory. The path must come from get_lecture. Size is limited. Read-only. Does not fetch arbitrary URLs.",
+    "Download one student-visible attachment from get_lecture. Pass lectureId and the material's unitId, or lectureId and attachmentId for a lecture-level file. The server chooses the same-origin student file. Read-only. Does not fetch arbitrary URLs.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
-    required: ["lectureId", "path"],
-    properties: { lectureId: ID, path: { type: "string" } },
+    required: ["lectureId"],
+    properties: { lectureId: ID, unitId: ID, attachmentId: ID },
   },
 };
 
@@ -402,6 +402,9 @@ async function callTool(params, impl) {
   }
   try {
     const payload = await dispatch(name, args, impl);
+    if (payload && payload.__download) {
+      return downloadContent(payload.__download);
+    }
     return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }], isError: false };
   } catch (error) {
     const safe = asSafe(error);
@@ -465,8 +468,8 @@ async function dispatch(name, args, impl) {
     return { messages: await impl.listMessages(args.courseId, args.conversationId, args.page) };
   }
   if (name === "download_attachment") {
-    requireOnly(args, ["lectureId", "path"]);
-    return { download: await impl.downloadAttachment(args.lectureId, args.path) };
+    requireOnly(args, ["lectureId", "unitId", "attachmentId"]);
+    return { __download: await impl.downloadAttachment(args.lectureId, args.unitId, args.attachmentId) };
   }
   if (name === "list_tutorial_groups") {
     requireOnly(args, ["courseId"]);
@@ -529,6 +532,14 @@ function requireOnly(args, allowed) {
 
 function hasSecretKey(args) {
   return Object.keys(args).some((key) => ["password", "token", "cookie", "authorization", "access_token"].includes(key.toLowerCase()));
+}
+
+function downloadContent(outcome) {
+  const content = [{ type: "text", text: JSON.stringify({ download: outcome.download }, null, 2) }];
+  if (outcome.resource) {
+    content.push({ type: "resource", resource: outcome.resource });
+  }
+  return { content, isError: false };
 }
 
 function toolError(code, message) {

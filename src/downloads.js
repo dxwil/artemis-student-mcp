@@ -1,31 +1,73 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { studentGetBytes } from "./auth.js";
 import { SafeError } from "./errors.js";
 import { resolveTokenFile } from "./session.js";
-import { requireId } from "./student-reads.js";
+import { findLectureDownload, getLecture } from "./student-reads.js";
 
-const ALLOWED = /^\/api\/core\/files\/attachments\/(?:lectures\/(\d+)\/|attachment-video-units\/(\d+)\/)/;
+export const EMBED_LIMIT = 2 * 1024 * 1024;
+const KEEP_MS = 24 * 60 * 60 * 1000;
 
-export async function downloadAttachment(env, lectureId, filePath, fetchImpl, nowMs = Date.now()) {
-  const lecture = requireId(lectureId);
-  if (typeof filePath !== "string" || !ALLOWED.test(filePath)) {
-    throw new SafeError("invalid_arguments", "The download path must be a lecture attachment path on this Artemis server.");
+const MIME = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  txt: "text/plain",
+  md: "text/markdown",
+  zip: "application/zip",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  mp4: "video/mp4",
+};
+
+export async function downloadAttachment(env, lectureId, selector, fetchImpl, nowMs = Date.now(), hooks = {}) {
+  const lecture = await getLecture(env, lectureId, null, fetchImpl, nowMs);
+  const material = findLectureDownload(lecture, selector ?? {});
+  const bytes = await studentGetBytes(env, material.path, fetchImpl, nowMs);
+  const filename = material.filename || "attachment";
+  const mimeType = mimeOf(filename);
+  const absolutePath = writeDownload(env, lecture.id, filename, bytes);
+  const download = {
+    bytes: bytes.length,
+    filename,
+    mimeType,
+    unitId: material.kind === "attachment" ? material.id : undefined,
+    attachmentId: material.attachmentId ?? (material.kind === "lecture-attachment" ? material.id : undefined),
+  };
+  let resource = null;
+  if (bytes.length <= EMBED_LIMIT) {
+    resource = {
+      uri: `file://${absolutePath}`,
+      mimeType,
+      blob: bytes.toString("base64"),
+    };
   }
-  const match = ALLOWED.exec(filePath);
-  const pathLecture = Number(match[1]);
-  if (match[1] && pathLecture !== lecture) {
-    throw new SafeError("forbidden", "The attachment path is not for the requested lecture.");
+  if (hooks.publishDownload) {
+    const published = hooks.publishDownload({ absolutePath, filename, mimeType });
+    download.downloadUrl = published.url;
+    download.expiresAt = published.expiresAt;
+    if (resource) {
+      resource.uri = published.url;
+    }
+    return { download, resource };
   }
-  const bytes = await studentGetBytes(env, filePath, fetchImpl, nowMs);
-  const directory = downloadDirectory(env, lecture);
-  const filename = safeFilename(filePath);
-  const destination = path.join(directory, filename);
+  download.absolutePath = absolutePath;
+  return { download, resource };
+}
+
+function writeDownload(env, lectureId, filename, bytes) {
+  const directory = downloadDirectory(env, lectureId);
+  sweepOld(directory);
+  const stored = `${crypto.randomBytes(8).toString("hex")}-${filename}`;
+  const destination = path.join(directory, stored);
   if (!destination.startsWith(directory + path.sep)) {
-    throw new SafeError("invalid_arguments", "The download path must be a lecture attachment path on this Artemis server.");
+    throw new SafeError("invalid_arguments", "The attachment name is not a safe filename.");
   }
   fs.writeFileSync(destination, bytes, { mode: 0o600 });
-  return { bytes: bytes.length, relativePath: path.posix.join("downloads", String(lecture), filename) };
+  return destination;
 }
 
 function downloadDirectory(env, lectureId) {
@@ -39,10 +81,21 @@ function downloadDirectory(env, lectureId) {
   return directory;
 }
 
-function safeFilename(filePath) {
-  const base = path.posix.basename(filePath).replace(/[^A-Za-z0-9._-]/g, "_");
-  if (base === "" || base === "." || base === ".." || base.length > 120) {
-    throw new SafeError("invalid_arguments", "The attachment name is not a safe filename.");
+function sweepOld(directory) {
+  const cutoff = Date.now() - KEEP_MS;
+  for (const name of fs.readdirSync(directory)) {
+    const file = path.join(directory, name);
+    try {
+      if (fs.statSync(file).mtimeMs < cutoff) {
+        fs.rmSync(file, { force: true });
+      }
+    } catch {
+      // A file removed between the listing and the stat is already gone.
+    }
   }
-  return base;
+}
+
+function mimeOf(filename) {
+  const extension = filename.toLowerCase().split(".").pop();
+  return MIME[extension] ?? "application/octet-stream";
 }

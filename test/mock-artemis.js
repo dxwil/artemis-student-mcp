@@ -79,8 +79,22 @@ function respond(scenario, url, init, env) {
       title: "Week 1",
       course: { id: 7 },
       lectureUnits: [
-        { id: 1, type: "attachment", name: "Slides", visibleToStudents: true, attachment: { link: "/api/core/files/slides.pdf" } },
-        { id: 2, type: "attachment", name: "Draft", visibleToStudents: false, attachment: { link: "/api/core/files/draft.pdf" } },
+        {
+          id: 1,
+          type: "attachment",
+          name: "Slides",
+          visibleToStudents: true,
+          releaseDate: "2020-04-01T00:00:00Z",
+          attachment: {
+            id: 21,
+            name: "Slides",
+            link: "attachments/attachment-video-units/1/slides.pdf",
+            attachmentType: "FILE",
+            version: 1,
+            studentVersion: "attachments/attachment-video-units/1/student/slides.pdf",
+          },
+        },
+        { id: 2, type: "attachment", name: "Draft", visibleToStudents: false, attachment: { id: 22, name: "Draft", link: "attachments/attachment-video-units/2/draft.pdf" } },
       ],
     });
   }
@@ -133,7 +147,7 @@ function respond(scenario, url, init, env) {
   if (scenario === "student-content" && url.pathname === "/api/exam/courses/7/exams/5/student-exams/6/grade-summary") {
     return Response.json({ grade: "2.0", studentResult: { score: 80, otherStudents: [{ email: "other@example.edu" }] } });
   }
-  if (scenario === "student-content" && url.pathname === "/api/core/files/attachments/lectures/4/slides.pdf") {
+  if (scenario === "student-content" && url.pathname === "/api/core/files/attachments/attachment-video-units/1/student/slides.pdf") {
     return new Response(Buffer.from("pdf-bytes"));
   }
   if (scenario === "student-content" && url.pathname === "/api/tutorialgroup/courses/7/tutorial-groups") {

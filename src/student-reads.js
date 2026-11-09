@@ -100,16 +100,48 @@ export function normalizeLectureDetail(payload, courseId, origin) {
   if (courseId != null && course != null && course !== courseId) {
     throw new SafeError("forbidden", "The lecture is not in the requested course.");
   }
+  const lectureId = requirePayloadId(payload.id);
+  const nowMs = Date.now();
+  const materials = payload.lectureUnits
+    .filter((unit) => unit && unit.visibleToStudents === true)
+    .map((unit) => materialReference(unit, origin, lectureId));
+  if (Array.isArray(payload.attachments)) {
+    for (const attachment of payload.attachments) {
+      const item = lectureAttachment(attachment, lectureId, nowMs);
+      if (item) {
+        materials.push(item);
+      }
+    }
+  }
   return {
-    id: requirePayloadId(payload.id),
+    id: lectureId,
     courseId: course ?? courseId,
     title: requireTitle(payload.title),
     description: optionalText(payload.description),
     startDate: normalizeDate(payload.startDate),
     endDate: normalizeDate(payload.endDate),
     tutorial: payload.isTutorialLecture === true,
-    materials: payload.lectureUnits.filter((unit) => unit && unit.visibleToStudents === true).map((unit) => materialReference(unit, origin)),
+    materials,
   };
+}
+
+export function findLectureDownload(lecture, selector) {
+  const unitId = selector.unitId == null ? null : requireId(selector.unitId);
+  const attachmentId = selector.attachmentId == null ? null : requireId(selector.attachmentId);
+  if ((unitId == null) === (attachmentId == null)) {
+    throw new SafeError("invalid_arguments", "Provide the unitId or attachmentId from get_lecture.");
+  }
+  const materials = Array.isArray(lecture?.materials) ? lecture.materials : [];
+  const match = unitId == null
+    ? materials.find((item) => item.kind === "lecture-attachment" && item.id === attachmentId)
+    : materials.find((item) => item.kind === "attachment" && item.id === unitId && (attachmentId == null || item.attachmentId === attachmentId));
+  if (!match) {
+    throw new SafeError("not_found", "That attachment is not in this lecture for the current student.");
+  }
+  if (typeof match.path !== "string") {
+    throw new SafeError("external_file", "That material is a link outside Artemis and was not downloaded.");
+  }
+  return match;
 }
 
 function normalizeExerciseSummary(entry, courseId) {
@@ -141,7 +173,7 @@ function normalizeLectureSummary(entry, courseId) {
   };
 }
 
-function materialReference(unit, origin) {
+function materialReference(unit, origin, lectureId) {
   const kind = unit.type;
   if (kind !== "attachment" && kind !== "online" && kind !== "text" && kind !== "exercise") {
     throw new SafeError("malformed", MALFORMED);
@@ -153,13 +185,7 @@ function materialReference(unit, origin) {
     releaseDate: normalizeDate(unit.releaseDate),
   };
   if (kind === "attachment") {
-    const link = safeLink(unit.attachment?.link, origin);
-    if (link?.path) {
-      reference.path = link.path;
-    }
-    if (link?.url) {
-      reference.url = link.url;
-    }
+    Object.assign(reference, attachmentFields(unit.attachment, { unitId: reference.id, lectureId, origin }));
   } else if (kind === "online") {
     const link = safeLink(unit.source, origin);
     if (link?.url) {
@@ -174,6 +200,131 @@ function materialReference(unit, origin) {
     reference.exerciseId = requirePayloadId(unit.exercise.id);
   }
   return reference;
+}
+
+function lectureAttachment(attachment, lectureId, nowMs) {
+  if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
+    return null;
+  }
+  const releaseDate = normalizeDate(attachment.releaseDate);
+  if (releaseDate && Date.parse(releaseDate) > nowMs) {
+    return null;
+  }
+  const reference = {
+    id: requirePayloadId(attachment.id),
+    kind: "lecture-attachment",
+    title: requireTitle(attachment.name),
+    releaseDate,
+  };
+  Object.assign(reference, attachmentFields(attachment, { lectureId }));
+  return reference;
+}
+
+function attachmentFields(attachment, scope) {
+  if (!attachment || typeof attachment !== "object") {
+    return {};
+  }
+  const fields = {};
+  if (attachment.id != null) {
+    fields.attachmentId = requirePayloadId(attachment.id);
+  }
+  if (attachment.attachmentType === "FILE" || attachment.attachmentType === "URL") {
+    fields.attachmentType = attachment.attachmentType;
+  }
+  if (Number.isSafeInteger(attachment.version) && attachment.version >= 0) {
+    fields.version = attachment.version;
+  }
+  const stored = storedAttachment(attachment.studentVersion, scope, true) ?? storedAttachment(attachment.link, scope, false);
+  if (stored?.path && scope.unitId && !stored.path.includes("/student/")) {
+    stored.path = `/api/core/files/attachments/attachment-video-units/${scope.unitId}/student/${encodeURIComponent(stored.filename)}`;
+  }
+  if (stored?.path) {
+    fields.path = stored.path;
+    fields.filename = stored.filename;
+  } else if (stored?.url) {
+    fields.url = stored.url;
+    fields.filename = stored.filename;
+  } else if (typeof attachment.name === "string" && safeSegment(attachment.name)) {
+    fields.filename = attachment.name;
+  }
+  return fields;
+}
+
+function storedAttachment(value, scope, studentVersion) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2000 || value.includes("\\") || value.includes("..")) {
+    return null;
+  }
+  const bare = value.split("#")[0].split("?")[0];
+  if (/^[a-z][a-z0-9+.-]*:/i.test(bare)) {
+    const link = safeLink(bare, scope.origin);
+    return link?.url ? { url: link.url, filename: fileName(bare, null) } : null;
+  }
+  let path = null;
+  if (bare.startsWith("/api/core/files/attachments/")) {
+    path = bare;
+  } else if (bare.startsWith("attachments/")) {
+    path = `/api/core/files/${bare}`;
+  } else if (bare.startsWith("files/attachments/")) {
+    path = `/api/core/${bare}`;
+  } else if (!bare.includes("/")) {
+    path = builtPath(bare, scope, studentVersion);
+  }
+  if (!acceptedDownloadPath(path, scope)) {
+    return null;
+  }
+  return { path, filename: fileName(path, null) };
+}
+
+function builtPath(filename, scope, studentVersion) {
+  if (!safeSegment(filename)) {
+    return null;
+  }
+  const encoded = encodeURIComponent(filename);
+  if (scope.unitId && studentVersion) {
+    return `/api/core/files/attachments/attachment-video-units/${scope.unitId}/student/${encoded}`;
+  }
+  if (scope.unitId) {
+    return `/api/core/files/attachments/attachment-video-units/${scope.unitId}/${encoded}`;
+  }
+  if (scope.lectureId) {
+    return `/api/core/files/attachments/lectures/${scope.lectureId}/${encoded}`;
+  }
+  return null;
+}
+
+function acceptedDownloadPath(filePath, scope) {
+  if (typeof filePath !== "string" || filePath.includes("?") || filePath.includes("#")) {
+    return false;
+  }
+  const segment = filePath.split("/").pop();
+  if (!safeSegment(decodeSegment(segment))) {
+    return false;
+  }
+  if (scope.unitId) {
+    const unit = String(scope.unitId);
+    return filePath === `/api/core/files/attachments/attachment-video-units/${unit}/student/${segment}` || filePath === `/api/core/files/attachments/attachment-video-units/${unit}/${segment}`;
+  }
+  return scope.lectureId != null && filePath === `/api/core/files/attachments/lectures/${scope.lectureId}/${segment}`;
+}
+
+function fileName(filePath, fallback) {
+  const segment = decodeSegment(String(filePath).split("/").pop() ?? "");
+  if (safeSegment(segment)) {
+    return segment;
+  }
+  return safeSegment(fallback) ? fallback : "attachment";
+}
+
+function decodeSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return "";
+  }
+}
+
+function safeSegment(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 120 && !value.includes("/") && !value.includes("\\") && value !== "." && value !== "..";
 }
 
 function safeLink(value, origin) {

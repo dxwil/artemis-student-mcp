@@ -116,7 +116,9 @@ Pinned to the same commit. All of these are GET. None of them start a participat
 
 `ExerciseResponseDTO.problemStatement` is a nullable string. The same record can carry example solutions, grading instructions, and repository URIs. This plugin copies only the statement and the three dates. `GET .../example-solution` is not called. `GET .../details` is not called, because that route also loads participations and results.
 
-`LectureForOverviewDTO` has `id`, `title`, nullable `startDate` and `endDate`, and `isTutorialLecture`. `LectureDetailsDTO` units are `attachment`, `online`, `text`, or `exercise`. A unit is kept only when `visibleToStudents` is true. Attachment links that stay on the Artemis origin are returned as paths. Other `https` links are returned as URLs and are not fetched. `POST .../completion` is not called.
+`LectureForOverviewDTO` has `id`, `title`, nullable `startDate` and `endDate`, and `isTutorialLecture`. `LectureDetailsDTO` at Artemis 10.6 (`43b26a1`) also has lecture-level `attachments`. Units are `attachment`, `online`, `text`, or `exercise`. A unit is kept only when `visibleToStudents` is true.
+
+`AttachmentDTO` is `id`, `name`, `link`, `releaseDate`, `uploadDate`, `version`, `attachmentType`, and `studentVersion`. `link` and `studentVersion` are not full `/api/...` URLs. They are paths relative to `api/core/files/` (`attachments/attachment-video-units/{unitId}/...` and `.../student/...`), or a bare filename, or an external `https` URL. The web client prepends `api/core/files/`. A stored attachment unit is downloaded from `GET /api/core/files/attachments/attachment-video-units/{unitId}/student/{filename}`, which is the student route (`@EnforceAtLeastStudent`). The unit file route without `/student/` is limited to tutors. A lecture-level file uses `GET /api/core/files/attachments/lectures/{lectureId}/{filename}`. External `https` links are returned as URLs and are not fetched. `POST .../completion` is not called.
 
 ## Later student reads
 
@@ -126,7 +128,7 @@ Still pinned to `43b26a1d892d7bb3d03c40af9d2829516894bc50`. Domain calls are GET
 - Results: `studentParticipations` on `GET /api/course/courses/{courseId}/exercises-for-overview`, only results with `completionDate`. Feedback: `GET /api/assessment/participations/{participationId}/results/{resultId}/details`.
 - Calendar: `GET /api/calendar/courses/{courseId}/calendar-events`. The subscription-token route is not called. Exam dates: `GET /api/exam/courses/{courseId}/exams-for-overview`. That DTO has no seat. Released grade: `GET /api/exam/courses/{courseId}/exams/{examId}/student-exams/{studentExamId}/grade-summary`. `own-student-exam` is not called.
 - Conversations: `GET /api/communication/courses/{courseId}/conversations` and the messages GET above. Unread, reaction, and post routes are not called.
-- Attachment bytes: `GET /api/core/files/attachments/lectures/{lectureId}/{name}` only when the path matches that lecture.
+- Attachment bytes: `GET /api/core/files/attachments/attachment-video-units/{unitId}/student/{filename}` for a visible attachment unit, or `GET /api/core/files/attachments/lectures/{lectureId}/{filename}` for a visible lecture-level file. The tool selects the path from the lecture details. A caller-supplied path is not fetched.
 - Tutorial groups: `GET /api/tutorialgroup/courses/{courseId}/tutorial-groups`. Competencies: `GET /api/atlas/courses/{courseId}/competencies`. Learning path: `GET /api/atlas/courses/{courseId}/learning-path/me`. FAQs: `GET /api/communication/courses/{courseId}/faqs`, keeping `ACCEPTED` only. Notifications: `GET /api/notification/courses/{courseId}`. The seen-status update route is not called.
 
 ## Student writes

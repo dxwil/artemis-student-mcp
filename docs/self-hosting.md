@@ -86,6 +86,8 @@ The password is discarded after the Artemis login call. The Artemis session is s
 
 A confirmation token for a write lives in that account's directory. It cannot be used with another person's access token.
 
+`download_attachment` does not ask a remote client to read the server's disk. Over HTTP the tool result includes the file as a base64 resource when it is at most 2 MB, and a download URL on this server's public origin. The URL is an unguessable token for that user, lasts 10 minutes, is deleted after it is fetched, and is not reusable. A local stdio client instead receives an absolute path under its data directory. Files older than a day are removed from that directory.
+
 ## What is stored
 
 `ARTEMIS_MCP_STATE_DIR` defaults to `/var/lib/artemis-student-mcp`. The directory is mode `0700`. Files inside it are mode `0600`.
