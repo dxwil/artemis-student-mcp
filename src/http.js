@@ -2,7 +2,7 @@ import { SafeError } from "./errors.js";
 import { isInstructorToken } from "./session.js";
 
 export const USER_AGENT = "artemis-student-mcp/0.1.0";
-const MAX_BYTES = 8 * 1024 * 1024;
+export const MAX_BYTES = 8 * 1024 * 1024;
 const REDIRECT = new Set([301, 302, 303, 307, 308]);
 
 /**

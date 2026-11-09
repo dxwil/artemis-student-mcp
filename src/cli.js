@@ -407,6 +407,13 @@ function writeStatus(env) {
   process.stdout.write(`expires: ${exp == null ? "unknown" : new Date(exp * 1000).toISOString()}\n`);
 }
 
+export async function readLoginSecrets(env) {
+  return {
+    username: await resolveUsername(env),
+    password: await resolvePassword(env),
+  };
+}
+
 async function resolveUsername(env) {
   if (typeof env.ARTEMIS_USERNAME === "string" && env.ARTEMIS_USERNAME.trim() !== "") {
     return env.ARTEMIS_USERNAME.trim();

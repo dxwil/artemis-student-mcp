@@ -143,13 +143,24 @@ From a terminal, the matching `artemis-student-auth` commands (`mark-notificatio
 
 Programming, modeling, and exam submissions are refused.
 
+## Self-hosting
+
+Stdio is the default. The same program can also listen for Streamable HTTP so an MCP client connects to `https://<your-domain>/mcp` on a machine you run, such as a Proxmox LXC behind your own reverse proxy. Remote clients authenticate with a bearer token. Artemis passwords are not put in URLs or stored. Setup, systemd, and proxy examples are in [docs/self-hosting.md](docs/self-hosting.md).
+
+```bash
+export ARTEMIS_MCP_STATE_DIR="$HOME/.local/share/artemis-student-mcp"
+./bin/artemis-student-mcp --http
+```
+
+The listener defaults to `127.0.0.1:8080`. `ARTEMIS_MCP_TRANSPORT=http` selects the same mode.
+
 ## Tests
 
 ```bash
 npm test
 ```
 
-`npm test` runs Node's built-in test runner. It covers the stdio handshake, `tools/list`, `tools/call` for every student read and the two-phase writes, password and directory-password login, refusal when single sign-on is the only method, HTTP 401, 403, and 404, disabled features, hidden and unreleased rows, attachment path checks, and the split between `mcp.json` and `cursor-mcp.json`. Network calls are mocked. Schema checks use the vendored Agent Plugins 1.0.0 schemas in `vendor/agent-plugins/1.0.0/`.
+`npm test` runs Node's built-in test runner. It covers the stdio handshake, `tools/list`, `tools/call` for every student read and the two-phase writes, password and directory-password login, refusal when single sign-on is the only method, Artemis HTTP 401, 403, and 404, disabled features, hidden and unreleased rows, attachment path checks, and the split between `mcp.json` and `cursor-mcp.json`. It also covers the Streamable HTTP listener: initialize, `tools/list`, `tools/call`, rejected bearer tokens, and confirmation tokens that do not cross accounts. Network calls are mocked. Schema checks use the vendored Agent Plugins 1.0.0 schemas in `vendor/agent-plugins/1.0.0/`.
 
 Mock tests do not log in to TUM. Browser single sign-on still cannot be finished by this plugin: the registered redirect is `https://artemis.tum.de/login/oauth2/code/oidc`, and the only native exchange codes are for the official VS Code and iOS apps.
 
