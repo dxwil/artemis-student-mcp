@@ -1,12 +1,14 @@
-# Self-hosting the HTTP listener
+# Self-hosting
 
 The stdio process is unchanged and remains the default. HTTP mode is for a machine you administer. It speaks the current Streamable HTTP MCP transport at `/mcp` and answers `GET /healthz` with `{"ok":true}`.
 
-A typical layout is a Debian 12 unprivileged Proxmox LXC. The Node process binds to `127.0.0.1:8080`. Caddy or nginx in the same container terminates TLS for your domain and proxies `/mcp`.
+A typical layout is a Debian 12 unprivileged Proxmox LXC. The Node process binds to `127.0.0.1:8080`. Caddy or nginx in the same container terminates TLS for your domain and proxies the whole site.
 
-This server does not implement MCP OAuth 2.1. It does not publish protected-resource metadata and it does not register OAuth clients. Each remote client sends a bearer token in the `Authorization` header. That is the supported remote authentication.
+Each person adds `https://<your-domain>/mcp` in their MCP client. The client discovers OAuth from a `401` and `WWW-Authenticate` header, registers itself, and opens a browser on this server. The person signs in with their own Artemis username and password. You do not create accounts or log anyone in on the server.
 
-Automated tests use an in-process mock of Artemis. They do not log in to a real Artemis server, and they do not exercise a real reverse proxy.
+This server is its own OAuth 2.1 authorization server: protected-resource metadata, authorization-server metadata, dynamic client registration, an authorization-code flow with PKCE `S256`, rotating refresh tokens, and revocation. It does not fetch client-id metadata documents from other hosts. A static bearer token is still available for an admin client that cannot do OAuth.
+
+Automated tests use an in-process mock of Artemis. They do not log in to a real Artemis server, and they do not exercise a real reverse proxy or a real MCP client.
 
 ## Size
 
@@ -22,21 +24,7 @@ For one or a few students:
 
 Node stays small. The extra disk is for the OS, the Node 22 install, and the state directory. Do not enable Docker. The process is a normal systemd service.
 
-## What is stored
-
-`ARTEMIS_MCP_STATE_DIR` defaults to `/var/lib/artemis-student-mcp`. The directory is mode `0700`. Files inside it are mode `0600`.
-
-| Path | Contents |
-| --- | --- |
-| `access-tokens.json` | SHA-256 hashes of client bearer tokens, plus a public id, label, and account id. The bearer token itself is not stored. |
-| `users/<id>/session.json` | The Artemis session for that one client token. |
-| `users/<id>/write-confirmations.json` | Two-phase write confirmations for that account only. |
-
-Creating a token creates a new account directory. Two tokens do not share confirmations, even if you later sign both into the same Artemis user. A confirmation token from one client is rejected for the other.
-
-The Artemis password is read from a hidden terminal prompt (or from `ARTEMIS_PASSWORD` if you set it for that command). It is not written to the state directory. Leave it unset so it is not in the shell history or the service environment. `ARTEMIS_REMEMBER_ME=true` asks Artemis for the longer session cookie. The password is still not stored. A new password login can cause Artemis to email the account; a saved session is reused until it expires.
-
-## Install
+## Install, set the env, start
 
 From a checkout of this repository, as root, on Debian 12:
 
@@ -45,6 +33,20 @@ sudo ./deploy/install-debian12.sh
 ```
 
 The script installs Node.js 22 from the official tarball when `node` is missing or older than 22, creates the system user `artemis-mcp`, copies the app to `/opt/artemis-student-mcp`, installs the systemd unit and an env file, and starts the service. It does not touch an existing `/etc/artemis-student-mcp.env` and it does not delete the state directory.
+
+Edit `/etc/artemis-student-mcp.env`:
+
+- `ARTEMIS_BASE_URL` is the Artemis origin, such as `https://artemis.tum.de`.
+- `ARTEMIS_MCP_PUBLIC_URL` is the public origin of this MCP server, with no path, such as `https://mcp.example.com`. That value is the OAuth issuer. The process does not take the issuer from `X-Forwarded-Proto` or `X-Forwarded-Host`.
+- `ARTEMIS_REMEMBER_ME=true` asks Artemis for a longer session. The password is still not stored. The first sign-in for an account can cause Artemis to email that account.
+
+Then:
+
+```bash
+systemctl restart artemis-student-mcp
+```
+
+Give each person `https://mcp.example.com/mcp`. They add that URL in Cursor, Claude, Grok Bot, or another client that implements MCP OAuth. The client opens the sign-in page. When the Artemis session later expires, the server answers `401` with `invalid_token` and the client starts the browser sign-in again.
 
 The same steps by hand:
 
@@ -69,84 +71,63 @@ systemctl daemon-reload
 systemctl enable --now artemis-student-mcp.service
 ```
 
-Edit `/etc/artemis-student-mcp.env` before or after the first start. Set `ARTEMIS_BASE_URL` to your Artemis origin. When you publish the proxy, set `ARTEMIS_MCP_PUBLIC_URL` to that HTTPS origin (`https://mcp.example.com`, with no path). Then restart:
-
-```bash
-systemctl restart artemis-student-mcp
-```
-
-The unit binds the process to the address in that file. The shipped default is `127.0.0.1:8080`. Logs go to the journal and do not include bearer tokens, Artemis session tokens, or passwords:
+The unit binds the process to the address in the env file. The shipped default is `127.0.0.1:8080`. Logs go to the journal and do not include OAuth tokens, Artemis session tokens, or passwords:
 
 ```bash
 journalctl -u artemis-student-mcp -f
+curl -fsS http://127.0.0.1:8080/healthz
 ```
 
-## Create a token and sign in
+## What the browser sign-in does
 
-Run the commands as `artemis-mcp` so the files stay owned by the service user. `su` gives the login command a terminal, which it needs to turn off echo.
+`GET /authorize` is a page on this server. It has no third-party scripts or images. It says that the server is unofficial and that the username and password are sent to this server, used once to sign in to the configured Artemis origin, and not stored. The form is protected by a cookie that must match a hidden field. Failed attempts are shown on the page and rate-limited per username and per TCP peer.
 
-```bash
-su -s /bin/bash artemis-mcp
-set -a
-. /etc/artemis-student-mcp.env
-set +a
-cd /opt/artemis-student-mcp
-./bin/artemis-student-mcp token create --label laptop
-./bin/artemis-student-mcp login t_<id>
-exit
-```
+The password is discarded after the Artemis login call. The Artemis session is stored under that person's account directory. Access tokens last 15 minutes. Refresh tokens last 30 days and rotate on every use. Reusing an old refresh token revokes that grant. `POST /revoke` revokes a presented token. Revoking a refresh token also revokes the access tokens in that grant.
 
-`token create` prints the bearer token once on stdout. Store it in the MCP client. It cannot be printed again. The id on the `id:` line is not a secret. Pass that id to `login`, `status`, `logout`, and `token revoke`. Do not pass the bearer token as an argument.
+A confirmation token for a write lives in that account's directory. It cannot be used with another person's access token.
 
-`login` asks for the Artemis username and password with echo off. It uses the same directory-password and normal password flow as `artemis-student-auth login`. Success prints `courses: N` after a real course-list call. The service reads the new session file on the next request. It does not need a restart.
+## What is stored
 
-```bash
-./bin/artemis-student-mcp token list
-./bin/artemis-student-mcp status t_<id>
-./bin/artemis-student-mcp logout t_<id>
-./bin/artemis-student-mcp token revoke t_<id>
-```
+`ARTEMIS_MCP_STATE_DIR` defaults to `/var/lib/artemis-student-mcp`. The directory is mode `0700`. Files inside it are mode `0600`.
 
-`logout` deletes that account's Artemis session and calls the Artemis logout endpoint. `token revoke` rejects the bearer token from then on. Revoking does not by itself call Artemis logout.
-
-The login origin has to match the service. Sourcing `/etc/artemis-student-mcp.env` is what keeps `ARTEMIS_BASE_URL` the same. A session saved for one origin is not sent to another.
+| Path | Contents |
+| --- | --- |
+| `oauth.json` | Hashes of authorization codes, access tokens, and refresh tokens, plus registered redirect URIs. The raw tokens are not stored. |
+| `access-tokens.json` | SHA-256 hashes of optional admin bearer tokens. |
+| `users/<id>/session.json` | The Artemis session for that one OAuth grant or admin token. |
+| `users/<id>/write-confirmations.json` | Two-phase write confirmations for that account only. |
 
 ## Reverse proxy
 
-TLS ends at the proxy. Leave the Node process on loopback. Do not publish port 8080 on the container's bridge.
+TLS ends at the proxy. Leave the Node process on loopback. Proxy the whole site, not only `/mcp`, so the client can fetch `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`, and `/revoke`. Do not publish port 8080 on the container's bridge.
 
-If the proxy runs on a different machine, set `ARTEMIS_MCP_HOST` to a private address, allow only the proxy to connect to that port, and still require bearer tokens. The process does not trust `X-Forwarded-For`. Failed authentications share one rate-limit bucket per TCP peer, which is the proxy when it is local. A valid bearer token is still accepted while that bucket is exhausted. Restarting the service clears the in-memory counters.
+Set `ARTEMIS_MCP_PUBLIC_URL` to the HTTPS origin. Send the public `Host` header. The server allows that host and, when a browser sends `Origin`, that origin. Requests with no `Origin` are allowed so native clients work. Loopback names stay allowed for local health checks.
 
-`ARTEMIS_MCP_PUBLIC_URL` is the origin clients use (`https://mcp.example.com`). The server allows that `Host` and, when a browser sends `Origin`, that origin. Requests with no `Origin` are allowed so native clients work. Any other `Host` or `Origin` is rejected. Loopback names are always allowed so a local health check works.
+`/mcp` must not be buffered. The server can answer `tools/call` with either JSON or a short server-sent event. `GET /mcp` returns 405 because this process does not open a standing event stream. Clients that speak Streamable HTTP continue with `POST`. The older HTTP+SSE transport is not implemented.
 
-`/mcp` must not be buffered. The server also accepts `text/event-stream` responses. `GET /mcp` returns 405 because this process does not open a standing server-sent-events stream. Clients that speak Streamable HTTP continue with `POST`. The older HTTP+SSE transport from protocol `2024-11-05` is not implemented.
+`/mcp` and `/healthz` reject every query string, so a token cannot be placed in the URL. `/authorize` uses its query string for the OAuth request. The password is only accepted as a form body.
 
-Any query string on `/mcp` or `/healthz` is rejected, including a token in the query.
+If the proxy runs on a different machine, set `ARTEMIS_MCP_HOST` to a private address and allow only the proxy to connect. The process does not trust `X-Forwarded-For`. Failed `/mcp` authentications share one rate-limit bucket per TCP peer. A still-valid token is not blocked by that counter. Sign-in attempts are limited separately. Restarting the service clears the in-memory counters.
 
 ### Caddy
 
 ```caddy
 mcp.example.com {
 	encode off
-	handle /mcp* {
-		reverse_proxy 127.0.0.1:8080 {
-			flush_interval -1
-			header_up Host {host}
-			header_up X-Forwarded-Proto {scheme}
-			transport http {
-				response_header_timeout 10m
-				read_timeout 10m
-				write_timeout 10m
-			}
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+		header_up Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		transport http {
+			response_header_timeout 10m
+			read_timeout 10m
+			write_timeout 10m
 		}
-	}
-	handle /healthz {
-		reverse_proxy 127.0.0.1:8080
 	}
 }
 ```
 
-`encode off` and `flush_interval -1` keep the proxy from buffering a stream. The ten-minute timeouts cover a slow Artemis read. Caddy obtains and renews the certificate for the site.
+`encode off` and `flush_interval -1` keep the proxy from buffering `/mcp`. The ten-minute timeouts cover a slow Artemis read. Caddy obtains and renews the certificate for the site. `X-Forwarded-Proto` is recorded for the proxy's own logs. This server does not use it to choose the OAuth issuer.
 
 ### nginx
 
@@ -156,11 +137,10 @@ server {
     http2 on;
     server_name mcp.example.com;
 
-    # Install certificates with your usual method, for example certbot.
     ssl_certificate     /etc/letsencrypt/live/mcp.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/mcp.example.com/privkey.pem;
 
-    location /mcp {
+    location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -174,49 +154,29 @@ server {
         proxy_send_timeout 10m;
         client_max_body_size 8m;
     }
-
-    location = /healthz {
-        proxy_pass http://127.0.0.1:8080/healthz;
-        proxy_set_header Host $host;
-    }
 }
 ```
 
-`client_max_body_size 8m` matches the server's request limit, which is the same 8 MB cap as a file-upload exercise.
+`client_max_body_size 8m` matches the MCP request limit, which is the same 8 MB cap as a file-upload exercise. OAuth form and registration bodies are limited further, to 16 KB.
 
-Check the listener before the proxy is public:
+## Optional admin bearer token
+
+A client that cannot run OAuth can still use a bearer token created on the server. Run the commands as `artemis-mcp` so the files stay owned by the service user. `su` gives the login command a terminal, which it needs to turn off echo.
 
 ```bash
-curl -fsS http://127.0.0.1:8080/healthz
+su -s /bin/bash artemis-mcp
+set -a
+. /etc/artemis-student-mcp.env
+set +a
+cd /opt/artemis-student-mcp
+./bin/artemis-student-mcp token create --label laptop
+./bin/artemis-student-mcp login t_<id>
+exit
 ```
 
-## Connect a client
+`token create` prints the bearer token once on stdout. It cannot be printed again. Pass the id, not the bearer token, to `login`, `status`, `logout`, and `token revoke`. `login` uses the same directory-password and password flow as the browser. The login origin has to match `ARTEMIS_BASE_URL`.
 
-The URL is `https://mcp.example.com/mcp`. The client must send:
-
-```http
-Authorization: Bearer <bearer-token>
-Accept: application/json, text/event-stream
-```
-
-In Cursor, add an MCP server by URL and set that header. Do not put the token in the URL. A client config that has a headers map looks like this:
-
-```json
-{
-  "mcpServers": {
-    "artemis-student": {
-      "url": "https://mcp.example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer <bearer-token>"
-      }
-    }
-  }
-}
-```
-
-Other MCP clients, including ones that add a server by URL, use the same URL and header. A client that can only authenticate with OAuth will not connect.
-
-Writes are still two steps. The first call returns a preview and a confirmation token and does not send the write. Show that preview to the person using the client. Send the confirmation token only after they approve. The token is valid only for the account directory of the bearer token that created it.
+The client then sends `Authorization: Bearer <bearer-token>` to `https://mcp.example.com/mcp`. Do not put the token in the URL.
 
 ## Update
 
@@ -231,7 +191,7 @@ Or copy a new tree over `/opt/artemis-student-mcp` and restart. Re-running `depl
 
 ## Backups
 
-The state directory contains Artemis session tokens. Treat the archive as a credential. Keep it on the same machine, mode `0600`, or encrypt it before it leaves.
+The state directory contains Artemis session tokens and hashes of OAuth tokens. Treat the archive as a credential. Keep it on the same machine, mode `0600`, or encrypt it before it leaves.
 
 ```bash
 umask 077
@@ -248,17 +208,20 @@ chmod 700 /var/lib/artemis-student-mcp
 systemctl start artemis-student-mcp
 ```
 
-Bearer tokens cannot be recovered from the hash file. Clients need the token you saved when you created it. Artemis sessions in `session.json` are what a backup restores.
+OAuth access and refresh tokens cannot be recovered from the hash file. People sign in again from the client. Artemis sessions in `session.json` are what a backup restores. An admin bearer token cannot be printed again. Create a new one if it was lost.
 
 ## Security
 
 - Bind to loopback unless the proxy is on another host, and then firewall that port.
-- Put TLS on the proxy. The Node process speaks plain HTTP.
-- Never put an Artemis password, an Artemis session, or a client bearer token in a URL. The server rejects every query string.
-- Bearer tokens are 256-bit random values. Only their SHA-256 hashes are stored. Comparison walks every hash with a constant-time compare.
-- Failed authentications are counted per TCP peer. After 30 failures in five minutes the server answers 429. A request that presents a still-valid token is not counted and is not blocked by that counter.
-- Request bodies are limited to 8 MB.
-- The service user is `artemis-mcp`, with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, and `StateDirectory`. `submit_file` reads a path on this machine as that user. A bearer token is the capability to call every tool, so do not give the service user a home directory full of private files, and do not run it as root.
+- Put TLS on the proxy. The Node process speaks plain HTTP. OAuth clients should use the HTTPS public origin.
+- `ARTEMIS_MCP_PUBLIC_URL` is the issuer. Forwarded headers do not change it.
+- The sign-in page and the Artemis password are not accepted in a URL.
+- OAuth tokens and admin bearer tokens are random. Only their SHA-256 hashes are stored. Comparison walks every hash with a constant-time compare.
+- Redirect URIs are matched exactly and must be HTTPS, a loopback `http` URL, or a private-use application scheme.
+- Failed `/mcp` authentications are counted per TCP peer. After 30 failures in five minutes the server answers 429. A request that presents a still-valid token is not counted.
+- Sign-in attempts are limited per username and per TCP peer. The limit is in memory and clears on restart.
+- MCP request bodies are limited to 8 MB. OAuth bodies are limited to 16 KB.
+- The service user is `artemis-mcp`, with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, and `StateDirectory`. `submit_file` reads a path on this machine as that user. An access token is the capability to call every tool, so do not run the service as root.
 - Instructor personal access tokens are still refused by the student session checks.
-- MCP session ids live in memory and are bound to the bearer token's account. They disappear when the process restarts. Clients send `initialize` again.
-- `GET /mcp` is 405. There is no legacy SSE endpoint and no OAuth discovery URL.
+- MCP session ids live in memory and are bound to the access token's account. They disappear when the process restarts. Clients send `initialize` again.
+- `GET /mcp` is 405. There is no legacy SSE endpoint.

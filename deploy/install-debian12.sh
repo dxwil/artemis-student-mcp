@@ -109,5 +109,5 @@ systemctl enable "$UNIT_NAME"
 systemctl restart "$UNIT_NAME"
 
 echo "Service ${UNIT_NAME} is installed."
-echo "Edit ${ENV_FILE} if this host should use a different Artemis origin or public URL."
-echo "Then, as ${APP_USER}, create a token and log in. See docs/self-hosting.md."
+echo "Edit ${ENV_FILE}: set ARTEMIS_BASE_URL and ARTEMIS_MCP_PUBLIC_URL, then restart the service."
+echo "Give each person https://<your-domain>/mcp. They sign in from the MCP client. See docs/self-hosting.md."
