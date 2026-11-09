@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import test from "node:test";
 import { startHttpServer } from "../src/http-server.js";
@@ -449,6 +450,77 @@ test("the public origin is the OAuth issuer and forwarded headers are ignored", 
   }
 });
 
+function originSentOnFormPost(policy, pageOrigin, targetOrigin) {
+  if (policy === "no-referrer") {
+    return "null";
+  }
+  if (policy === "same-origin") {
+    return pageOrigin === targetOrigin ? pageOrigin : "null";
+  }
+  if (policy === "strict-origin") {
+    const page = new URL(pageOrigin);
+    const target = new URL(targetOrigin);
+    if (page.protocol === "https:" && target.protocol !== "https:") {
+      return "null";
+    }
+    return pageOrigin;
+  }
+  throw new Error("unexpected referrer policy");
+}
+
+test("the sign-in form posts the public Origin and still rejects Origin null", async () => {
+  const directory = tempDir();
+  const jwt = fakeJwt(4_102_444_800);
+  const route = artemisFetch({ [USERNAME]: jwt });
+  const publicOrigin = "https://mcp.example.com";
+  const server = await startHttpServer({
+    env: {
+      ARTEMIS_MCP_STATE_DIR: directory,
+      ARTEMIS_BASE_URL: "https://artemis.test",
+      ARTEMIS_MCP_PUBLIC_URL: publicOrigin,
+    },
+    fetchImpl: route.fetchImpl,
+    host: "127.0.0.1",
+    port: 0,
+    log() {},
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const resource = `${publicOrigin}/mcp`;
+  try {
+    const clientId = await registerClient(base, REDIRECT);
+    const pair = pkce();
+    const authorize = new URL("/authorize", base);
+    authorize.searchParams.set("response_type", "code");
+    authorize.searchParams.set("client_id", clientId);
+    authorize.searchParams.set("redirect_uri", REDIRECT);
+    authorize.searchParams.set("code_challenge", pair.challenge);
+    authorize.searchParams.set("code_challenge_method", "S256");
+    authorize.searchParams.set("resource", resource);
+    authorize.searchParams.set("state", "origin");
+    const page = await fetch(authorize);
+    const html = await page.text();
+    assert.equal(page.status, 200);
+    const policy = page.headers.get("referrer-policy");
+    assert.equal(policy, "same-origin");
+    const postedOrigin = originSentOnFormPost(policy, publicOrigin, publicOrigin);
+    assert.equal(postedOrigin, publicOrigin);
+    assert.equal(originSentOnFormPost("no-referrer", publicOrigin, publicOrigin), "null");
+    const txn = html.match(/name="txn" value="([^"]+)"/)[1];
+    const csrf = html.match(/name="csrf" value="([^"]+)"/)[1];
+    const cookie = page.headers.getSetCookie()[0].split(";")[0];
+    const form = new URLSearchParams({ txn, csrf, username: USERNAME, password: PASSWORD }).toString();
+    const opaque = await postForm(server.address().port, form, { cookie, origin: "null" });
+    assert.equal(opaque.status, 403);
+    assert.equal(JSON.parse(opaque.body).error, "forbidden");
+    const signed = await postForm(server.address().port, form, { cookie, origin: postedOrigin });
+    assert.equal(signed.status, 302);
+    assert.equal(new URL(signed.headers.location).searchParams.get("state"), "origin");
+    assert.equal(route.calls.some((call) => call.path === "/api/core/public/authenticate" && call.password === PASSWORD), true);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("oauth login is rate limited and uses directory password when Artemis lists ldap", async () => {
   const directory = tempDir();
   const jwt = fakeJwt(4_102_444_800);
@@ -646,6 +718,32 @@ test("revoking an access token blocks it and a refresh can mint another", async 
     await closeServer(server);
   }
 });
+
+function postForm(port, body, headers) {
+  return new Promise((resolve, reject) => {
+    const payload = Buffer.from(body);
+    const req = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        method: "POST",
+        path: "/authorize",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": payload.length,
+          ...headers,
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
+      },
+    );
+    req.on("error", reject);
+    req.end(payload);
+  });
+}
 
 function walk(directory) {
   const parts = [];
