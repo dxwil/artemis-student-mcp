@@ -1105,6 +1105,8 @@ function sendHtml(res, status, html, extra = {}) {
   res.writeHead(status, {
     ...SECURITY_HEADERS,
     ...extra,
+    // same-origin: a same-origin form POST sends this page's Origin. no-referrer would send Origin: null, which the host gate rejects.
+    "Referrer-Policy": "same-origin",
     "Content-Type": "text/html; charset=utf-8",
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     "Content-Length": String(body.length),

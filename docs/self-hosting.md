@@ -80,7 +80,7 @@ curl -fsS http://127.0.0.1:8080/healthz
 
 ## What the browser sign-in does
 
-`GET /authorize` is a page on this server. It has no third-party scripts or images. It says that the server is unofficial and that the username and password are sent to this server, used once to sign in to the configured Artemis origin, and not stored. The form is protected by a cookie that must match a hidden field. Failed attempts are shown on the page and rate-limited per username and per TCP peer.
+`GET /authorize` is a page on this server. It has no third-party scripts or images. It says that the server is unofficial and that the username and password are sent to this server, used once to sign in to the configured Artemis origin, and not stored. The form is protected by a cookie that must match a hidden field. The page is sent with `Referrer-Policy: same-origin`, so a browser includes this site's origin on the form POST. A POST whose `Origin` is the string `null` is still rejected. Failed attempts are shown on the page and rate-limited per username and per TCP peer.
 
 The password is discarded after the Artemis login call. The Artemis session is stored under that person's account directory. Access tokens last 15 minutes. Refresh tokens last 30 days and rotate on every use. Reusing an old refresh token revokes that grant. `POST /revoke` revokes a presented token. Revoking a refresh token also revokes the access tokens in that grant.
 
