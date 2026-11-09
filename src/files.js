@@ -16,8 +16,6 @@ const ALLOWED = [
   /^\/api\/core\/files\/file-upload-exercises\/\d+\/submissions\/\d+\/[^/]+$/,
 ];
 
-const FILE_URI = "artemis://files/";
-
 const MIME = {
   pdf: "application/pdf",
   png: "image/png",
@@ -56,11 +54,9 @@ export function normalizeStudentFilePath(input, origin) {
   if (!ALLOWED.some((pattern) => pattern.test(plain))) {
     throw new SafeError("invalid_arguments", INVALID);
   }
-  const path = `${PREFIX}${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
   return {
-    path,
+    path: `${PREFIX}${segments.map((segment) => encodeURIComponent(segment)).join("/")}`,
     filename: segments.at(-1),
-    uri: `${FILE_URI}${path.slice(PREFIX.length)}`,
     mimeType: mimeOf(segments.at(-1)),
   };
 }
@@ -72,20 +68,8 @@ export function describeStudentFile(reference, origin, name) {
     name: label,
     filename: normalized.filename,
     path: normalized.path,
-    uri: normalized.uri,
     mimeType: normalized.mimeType,
   };
-}
-
-export function pathFromFileUri(uri) {
-  if (typeof uri !== "string" || !uri.startsWith(FILE_URI) || uri.length > 2200) {
-    throw new SafeError("invalid_arguments", INVALID);
-  }
-  const relative = uri.slice(FILE_URI.length);
-  if (relative === "" || relative.startsWith("/") || relative.includes("?") || relative.includes("#") || relative.includes("\\")) {
-    throw new SafeError("invalid_arguments", INVALID);
-  }
-  return relative;
 }
 
 export function mimeOf(filename) {

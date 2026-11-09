@@ -86,7 +86,7 @@ The password is discarded after the Artemis login call. The Artemis session is s
 
 A confirmation token for a write lives in that account's directory. It cannot be used with another person's access token.
 
-`download_file`, lecture materials, and file links in posts and problem statements return an MCP `resource_link` whose URI is `artemis://files/` plus the path relative to `api/core/files/`. The same URI works over stdio and HTTP. `resources/read` checks the student file allowlist, then fetches the bytes from Artemis with that caller's own session. The server does not write the file to disk and does not publish a download URL. A read without a signed-in session is rejected. Other hosts and paths outside the student file prefixes are refused before any request.
+`download_file`, lecture materials, and file links in posts and problem statements return a `downloadUrl` on this server: `<public URL>/files/<token>`. Minting the link does not download the file. The token is random. The server stores only its hash in memory, with the allowlisted path, the caller's account, and a 10-minute expiry. `GET /files/<token>` checks the token, expiry, and allowlist, then streams the file from Artemis with that caller's session. The body is not buffered and is not written to disk. The link works once. `HEAD` checks the link and does not use it up. A missing Artemis session returns 401. A revoked sign-in returns 410. An expired or reused link returns 404. A stdio session has no public URL, so `download_file` returns `http_required` and does not fetch the file.
 
 ## What is stored
 
@@ -129,7 +129,7 @@ mcp.example.com {
 }
 ```
 
-`encode off` and `flush_interval -1` keep the proxy from buffering `/mcp`. The ten-minute timeouts cover a slow Artemis read. Caddy obtains and renews the certificate for the site. `X-Forwarded-Proto` is recorded for the proxy's own logs. This server does not use it to choose the OAuth issuer.
+`encode off` and `flush_interval -1` keep the proxy from buffering `/mcp` and `/files/`. The ten-minute timeouts cover a slow Artemis read. Caddy obtains and renews the certificate for the site. `X-Forwarded-Proto` is recorded for the proxy's own logs. This server does not use it to choose the OAuth issuer.
 
 ### nginx
 
@@ -160,6 +160,8 @@ server {
 ```
 
 `client_max_body_size 8m` matches the MCP request limit, which is the same 8 MB cap as a file-upload exercise. OAuth form and registration bodies are limited further, to 16 KB.
+
+`proxy_buffering off` applies to `/files/` as well as `/mcp`. Leave it off. If you split `/files/` into its own `location`, copy the proxy settings above and add `proxy_max_temp_file_size 0` so nginx does not spill a large download onto disk. `gzip off` avoids compressing the stream. The sample `location /` already covers `/files/`, so an existing config with that one location does not need a new block as long as buffering stays off.
 
 ## Optional admin bearer token
 

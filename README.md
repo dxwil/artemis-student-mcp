@@ -115,7 +115,7 @@ Reads take no confirmation. Writes are listed in the next section.
 | `get_exam_result` | Released grade summary for `courseId`, `examId`, and `studentExamId`. |
 | `list_conversations` | Conversation titles in `courseId`. |
 | `list_messages` | One page of posts in `courseId` and `conversationId`. Posts include `files` for student file links in the text. |
-| `download_file` | One student file as a `resource_link` (`artemis://files/...`). `path` may be a full URL on this Artemis server, `/api/core/files/...`, or the relative form under `api/core/files/`. Read the bytes with `resources/read`. |
+| `download_file` | One student file as a `downloadUrl` on this server (`/files/<token>`), plus name, mime type, expiry, and the Artemis path. The link lasts 10 minutes and works once. `path` may be a full URL on this Artemis server, `/api/core/files/...`, or the relative form under `api/core/files/`. HTTP mode only. |
 | `download_attachment` | Lecture-file alias for `download_file`. Pass `lectureId` and `unitId` or `attachmentId` from `get_lecture`. The server resolves the student path. |
 | `list_tutorial_groups` | Tutorial groups for `courseId`. |
 | `list_competencies` | Course competencies, or `not_enabled` when Atlas is off. |

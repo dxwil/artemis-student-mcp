@@ -213,6 +213,19 @@ async function getJson(origin, token, path, fetchImpl, options) {
   return parseJsonBody(response.body);
 }
 
+export async function openStudentFile(env, path, fetchImpl = globalThis.fetch, nowMs = Date.now()) {
+  if (typeof path !== "string" || !path.startsWith("/api/core/files/") || path.includes("..") || path.includes("\\") || path.includes("?")) {
+    throw new SafeError("invalid_arguments", "The download path is not a same-origin Artemis file path.");
+  }
+  const config = resolveConfig(env, nowMs);
+  const token = usableToken(config);
+  if (!token) {
+    return { signedIn: false };
+  }
+  const response = await exchange(fetchImpl, config.origin, path, { method: "GET", token, stream: true });
+  return { signedIn: true, status: response.status, headers: response.headers, body: response.body };
+}
+
 export async function studentGetBytes(env, path, fetchImpl = globalThis.fetch, nowMs = Date.now()) {
   if (typeof path !== "string" || !path.startsWith("/api/core/files/") || path.includes("..") || path.includes("\\") || path.includes("?")) {
     throw new SafeError("invalid_arguments", "The download path is not a same-origin Artemis file path.");

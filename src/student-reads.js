@@ -247,7 +247,6 @@ function attachmentFields(attachment, scope) {
     fields.filename = stored.filename;
     const link = storedFileLink(stored.path, stored.filename);
     if (link) {
-      fields.uri = link.uri;
       fields.mimeType = link.mimeType;
     }
   } else if (stored?.url) {
