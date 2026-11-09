@@ -85,6 +85,9 @@ export async function exchange(fetchImpl, origin, path, options = {}) {
       "Artemis redirected the request too many times. The session was not followed further.",
     );
   }
+  if (options.stream) {
+    return { status: response.status, headers: response.headers, body: response.body };
+  }
   return { status: response.status, body: await readLimited(response) };
 }
 

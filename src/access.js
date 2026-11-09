@@ -133,6 +133,20 @@ export function findAccessToken(stateDir, tokenId, usage = "Usage: artemis-stude
   return publicRecord(record);
 }
 
+export function staticCallerState(stateDir, userId) {
+  let records = [];
+  try {
+    records = readTokens(stateDir);
+  } catch {
+    return "none";
+  }
+  const mine = records.filter((entry) => entry.userId === userId);
+  if (mine.length === 0) {
+    return "none";
+  }
+  return mine.some((entry) => !entry.revokedAt) ? "live" : "revoked";
+}
+
 export function verifyBearer(stateDir, presented) {
   const material = typeof presented === "string" && presented.length > 0 && presented.length <= 256 ? presented : "\0";
   const digest = crypto.createHash("sha256").update(material, "utf8").digest();

@@ -104,7 +104,7 @@ test("exercise detail keeps the statement and drops solutions", async () => {
     NOW,
     "https://artemis.test",
   );
-  assert.equal(linked.files[0].uri, "artemis://files/markdown/sheet.pdf");
+  assert.equal(linked.files[0].path, "/api/core/files/markdown/sheet.pdf");
   assert.equal(detail.dueDate, null);
   assert.equal(JSON.stringify(detail).includes("SECRET_SOLUTION"), false);
   assert.equal(JSON.stringify(detail).includes("hidden rubric"), false);
@@ -158,7 +158,7 @@ test("lecture materials keep safe references and omit hidden units", async () =>
   assert.equal(lecture.materials[0].path, "/api/core/files/attachments/attachment-video-units/1/student/slides.pdf");
   assert.equal(lecture.materials[0].attachmentId, 21);
   assert.equal(lecture.materials[0].filename, "slides.pdf");
-  assert.equal(lecture.materials[0].uri, "artemis://files/attachments/attachment-video-units/1/student/slides.pdf");
+  assert.equal(lecture.materials[0].mimeType, "application/pdf");
   assert.equal(lecture.materials[0].attachmentType, "FILE");
   assert.equal(lecture.materials[0].version, 2);
   assert.equal(lecture.materials[1].url, "https://cdn.example/video");

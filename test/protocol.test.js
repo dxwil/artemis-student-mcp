@@ -115,7 +115,9 @@ test("stdio handshake lists only list_courses and returns normalized courses", a
   const { initialized, tools } = await handshake(client);
   assert.equal(initialized.result.protocolVersion, "2025-06-18");
   assert.equal(initialized.result.serverInfo.name, "artemis-student");
-  assert.deepEqual(initialized.result.capabilities.resources, { subscribe: false, listChanged: false });
+  assert.deepEqual(initialized.result.capabilities, { tools: { listChanged: false } });
+  const listedAgain = await client.request({ jsonrpc: "2.0", id: "tools-again", method: "tools/list" });
+  assert.deepEqual(listedAgain.result.tools.map((tool) => tool.name), tools.result.tools.map((tool) => tool.name));
   assert.deepEqual(
     tools.result.tools.map((tool) => tool.name),
     ["get_account", "list_courses", "list_exercises", "get_exercise", "list_lectures", "get_lecture", "list_announcements", "list_results", "get_feedback", "list_calendar", "list_exams", "get_exam_result", "list_conversations", "list_messages", "download_file", "download_attachment",
@@ -335,8 +337,6 @@ test("every student read answers over tools/call and stays on GET", async () => 
     ["get_exam_result", { courseId: 7, examId: 5, studentExamId: 6 }, "examResult"],
     ["list_conversations", { courseId: 7 }, "conversations"],
     ["list_messages", { courseId: 7, conversationId: 9, page: 0 }, "messages"],
-    ["download_file", { path: "/api/core/files/attachments/attachment-video-units/1/student/slides.pdf" }, "download"],
-    ["download_attachment", { lectureId: 4, unitId: 1 }, "download"],
     ["list_tutorial_groups", { courseId: 7 }, "tutorialGroups"],
     ["list_competencies", { courseId: 7 }, "competencies"],
     ["get_learning_path", { courseId: 7 }, "learningPath"],
@@ -354,14 +354,16 @@ test("every student read answers over tools/call and stays on GET", async () => 
     assert.equal(JSON.stringify(body).includes("secret-faq"), false, name);
     assert.equal(JSON.stringify(body).includes("hidden-text"), false, name);
   }
-  const read = await client.request({
-    jsonrpc: "2.0",
-    id: "read-slides",
-    method: "resources/read",
-    params: { uri: "artemis://files/attachments/attachment-video-units/1/student/slides.pdf" },
-  });
-  assert.equal(Buffer.from(read.result.contents[0].blob, "base64").toString("utf8"), "pdf-bytes");
-  assert.equal(fs.existsSync(path.join(directory, "downloads")), false);
+  for (const [name, args] of [
+    ["download_file", { path: "/api/core/files/attachments/attachment-video-units/1/student/slides.pdf" }],
+    ["download_attachment", { lectureId: 4, unitId: 1 }],
+  ]) {
+    const response = await client.request({ jsonrpc: "2.0", id: name, method: "tools/call", params: { name, arguments: args } });
+    assert.equal(response.result.isError, true, name);
+    assert.equal(JSON.parse(response.result.content[0].text).error, "http_required");
+  }
+  const resources = await client.request({ jsonrpc: "2.0", id: "resources", method: "resources/read", params: { uri: "artemis://files/x" } });
+  assert.equal(resources.error.code, -32601);
   const finished = await client.close();
   const recorded = JSON.parse(fs.readFileSync(trace, "utf8"));
   assert.equal(recorded.every((call) => call.method === "GET"), true);

@@ -1,11 +1,14 @@
 import crypto from "node:crypto";
 import http from "node:http";
-import { envForAccount, ensureStateDir, resolveStateDir } from "./access.js";
+import { Readable } from "node:stream";
+import { envForAccount, ensureStateDir, resolveStateDir, staticCallerState } from "./access.js";
+import { openStudentFile } from "./auth.js";
+import { createDownloadDesk, reviewStoredPath } from "./download-desk.js";
 import { SafeError } from "./errors.js";
 import { MAX_BYTES } from "./http.js";
 import { createToolImpl } from "./impl.js";
 import { createMcpHandler, SUPPORTED_PROTOCOL_VERSIONS } from "./mcp.js";
-import { authenticateBearer, createOAuthRuntime, oauthSessionLive, revokeOAuthGrant, routeOAuth, wwwAuthenticate } from "./oauth.js";
+import { authenticateBearer, createOAuthRuntime, oauthCallerState, oauthSessionLive, publicBaseUrl, revokeOAuthGrant, routeOAuth, wwwAuthenticate } from "./oauth.js";
 
 export { MAX_BYTES as MAX_HTTP_BODY_BYTES };
 export const DEFAULT_AUTH_FAILURE_LIMIT = 30;
@@ -67,8 +70,9 @@ export async function startHttpServer(options = {}) {
   const tails = new Map();
   const limiter = createLimiter(config.authFailureLimit, config.authFailureWindowMs);
   const oauth = createOAuthRuntime(options);
+  const downloads = createDownloadDesk({ now: options.now });
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, { config, sessions, tails, limiter, oauth, server }).catch(() => {
+    handleRequest(req, res, { config, sessions, tails, limiter, oauth, downloads, server }).catch(() => {
       if (!res.headersSent) {
         try {
           finish(req, res, 500, { error: "internal" }, { close: true });
@@ -95,7 +99,7 @@ async function handleRequest(req, res, ctx) {
     return;
   }
   const pathname = url.pathname === "/mcp/" ? "/mcp" : url.pathname;
-  const safePath = KNOWN_PATHS.has(pathname) ? pathname : "/";
+  const safePath = pathname.startsWith("/files/") ? "/files" : KNOWN_PATHS.has(pathname) ? pathname : "/";
   const reply = (status, payload, extra) => {
     finish(req, res, status, payload, extra);
     config.log(`${status} ${safePath}\n`);
@@ -122,6 +126,16 @@ async function handleRequest(req, res, ctx) {
       return;
     }
     reply(400, { error: "query_rejected" }, { close: true });
+    return;
+  }
+  if (pathname.startsWith("/files/")) {
+    const token = pathname.slice("/files/".length);
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      reply(405, { error: "method_not_allowed" }, { headers: { Allow: "GET, HEAD" } });
+      return;
+    }
+    req.resume();
+    await serveDownload(req, res, ctx, token, req.method === "HEAD", safePath);
     return;
   }
   if (pathname === "/healthz") {
@@ -382,11 +396,153 @@ function openSession(ctx, userId) {
   const session = {
     id: crypto.randomBytes(32).toString("hex"),
     userId,
-    handler: createMcpHandler(createToolImpl(accountEnv, ctx.config.fetchImpl)),
+    handler: createMcpHandler(createToolImpl(accountEnv, ctx.config.fetchImpl, {
+      issueDownload(file) {
+        return ctx.downloads.issue({
+          userId,
+          path: file.path,
+          filename: file.filename,
+          mimeType: file.mimeType,
+          base: publicBaseUrl(ctx.config, listenPort(ctx.server)),
+          origin: accountEnv.ARTEMIS_BASE_URL,
+        });
+      },
+    })),
     lastUsed: Date.now(),
   };
   ctx.sessions.set(session.id, session);
   return session;
+}
+
+async function serveDownload(req, res, ctx, token, head, safePath) {
+  const record = head ? ctx.downloads.inspect(token) : ctx.downloads.take(token);
+  if (!record) {
+    finish(req, res, 404, { error: "not_found", message: "This download link is unknown, expired, or already used." });
+    ctx.config.log(`404 ${safePath}\n`);
+    return;
+  }
+  let described;
+  try {
+    described = reviewStoredPath(record.path, ctx.config.env.ARTEMIS_BASE_URL);
+  } catch {
+    finish(req, res, 404, { error: "not_found", message: "This download link is not a student file." });
+    ctx.config.log(`404 ${safePath}\n`);
+    return;
+  }
+  const access = callerAccess(ctx.config.stateDir, record.userId);
+  if (access === "revoked") {
+    finish(req, res, 410, { error: "gone", message: "The sign-in for this download was revoked." });
+    ctx.config.log(`410 ${safePath}\n`);
+    return;
+  }
+  if (head) {
+    const headers = downloadHeaders(record, null);
+    res.writeHead(200, headers);
+    res.end();
+    ctx.config.log(`200 ${safePath}\n`);
+    return;
+  }
+  const accountEnv = envForAccount(ctx.config.env, ctx.config.stateDir, record.userId);
+  let opened;
+  try {
+    opened = await openStudentFile(accountEnv, described.path, ctx.config.fetchImpl);
+  } catch {
+    finish(req, res, 502, { error: "bad_gateway", message: "Artemis did not return the file." });
+    ctx.config.log(`502 ${safePath}\n`);
+    return;
+  }
+  if (!opened.signedIn) {
+    finish(req, res, 401, { error: "unauthorized", message: "The Artemis session for this download is no longer available." });
+    ctx.config.log(`401 ${safePath}\n`);
+    return;
+  }
+  if (opened.status !== 200) {
+    await cancelBody(opened.body);
+    const mapped = mapArtemisStatus(opened.status);
+    finish(req, res, mapped.status, { error: mapped.error, message: mapped.message });
+    ctx.config.log(`${mapped.status} ${safePath}\n`);
+    return;
+  }
+  const headers = downloadHeaders(record, opened.headers);
+  res.writeHead(200, headers);
+  ctx.config.log(`200 ${safePath}\n`);
+  pipeBody(res, opened.body);
+}
+
+function callerAccess(stateDir, userId) {
+  const staticState = staticCallerState(stateDir, userId);
+  const oauthState = oauthCallerState(stateDir, userId);
+  if (staticState === "live" || oauthState === "live") {
+    return "live";
+  }
+  if (staticState === "revoked" || oauthState === "revoked") {
+    return "revoked";
+  }
+  return "unknown";
+}
+
+function mapArtemisStatus(status) {
+  if (status === 401) {
+    return { status: 401, error: "unauthorized", message: "Artemis rejected the session for this download." };
+  }
+  if (status === 403) {
+    return { status: 403, error: "forbidden", message: "Artemis refused this file for the current student session." };
+  }
+  if (status === 404) {
+    return { status: 404, error: "not_found", message: "Artemis could not find that file." };
+  }
+  if (status === 429) {
+    return { status: 429, error: "rate_limited", message: "Artemis rate-limited the download." };
+  }
+  return { status: 502, error: "bad_gateway", message: "Artemis did not return the file." };
+}
+
+function downloadHeaders(record, upstream) {
+  const headers = {
+    "Content-Type": upstreamType(upstream) || record.mimeType || "application/octet-stream",
+    "Content-Disposition": contentDisposition(record.filename),
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  };
+  const length = upstream?.get?.("content-length");
+  if (typeof length === "string" && /^\d{1,12}$/.test(length)) {
+    headers["Content-Length"] = length;
+  }
+  return headers;
+}
+
+function upstreamType(upstream) {
+  const raw = upstream?.get?.("content-type");
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const token = raw.split(";")[0].trim().toLowerCase();
+  return /^[\w.+-]+\/[\w.+-]+$/.test(token) ? token : null;
+}
+
+function contentDisposition(filename) {
+  const ascii = String(filename).replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "").slice(0, 150) || "download";
+  return `attachment; filename="${ascii}"`;
+}
+
+function pipeBody(res, body) {
+  if (!body) {
+    res.end();
+    return;
+  }
+  const stream = Readable.fromWeb(body);
+  stream.on("error", () => {
+    res.destroy();
+  });
+  stream.pipe(res);
+}
+
+async function cancelBody(body) {
+  try {
+    await body?.cancel();
+  } catch {
+    // The unused Artemis body is discarded.
+  }
 }
 
 function sendRpc(res, reply, payload, sessionId, accept) {

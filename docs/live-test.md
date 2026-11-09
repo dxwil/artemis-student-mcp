@@ -33,7 +33,7 @@ unset ARTEMIS_USERNAME ARTEMIS_PASSWORD
 
 Replace `COURSE_ID`, `EXERCISE_ID`, and `LECTURE_ID` with numbers from your own account. Default output is counts and whether a statement or deadlines exist. It does not print titles or statement text. Add `--show` only when you mean to print that text locally. Do not send `--show` output unless you intend to share it.
 
-Safe lines look like `exercises: N`, `announcements: N`, `results: N`, `events: N`, `exams: N`, `conversations: N`, `messages: N`, an `artemis://files/` URI, `tutorialGroups: N`, `faqs: N`, and `notifications: N`. A sanitized stderr line is also safe. Do not send a password, a token, or the session file. These later reads were not live-tested here.
+Safe lines look like `exercises: N`, `announcements: N`, `results: N`, `events: N`, `exams: N`, `conversations: N`, `messages: N`, `tutorialGroups: N`, `faqs: N`, and `notifications: N`. The local `file` and `download` commands report that a download link needs the HTTP server. A sanitized stderr line is also safe. Do not send a password, a token, or the session file. These later reads were not live-tested here.
 
 `chmod` is there in case clone drops the executable bit. `node ./bin/artemis-student-auth login` is the same command without that bit.
 

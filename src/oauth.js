@@ -73,6 +73,22 @@ export function authenticateBearer(stateDir, presented) {
   };
 }
 
+export function oauthCallerState(stateDir, userId) {
+  let store;
+  try {
+    store = loadStore(stateDir);
+  } catch {
+    return "none";
+  }
+  const now = Date.now();
+  const entries = [...store.access, ...store.refresh].filter((entry) => entry && entry.userId === userId);
+  if (entries.length === 0) {
+    return "none";
+  }
+  const live = entries.some((entry) => !entry.revokedAt && (typeof entry.expiresAt !== "number" || entry.expiresAt > now));
+  return live ? "live" : "revoked";
+}
+
 export function oauthSessionLive(env, stateDir, userId) {
   try {
     const accountEnv = envForAccount(env, stateDir, userId);
