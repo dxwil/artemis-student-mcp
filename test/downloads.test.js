@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { createAccessToken, userDirectory } from "../src/access.js";
-import { downloadAttachment } from "../src/downloads.js";
+import { downloadAttachment, downloadFile, readStudentFile } from "../src/downloads.js";
+import { createMcpHandler } from "../src/mcp.js";
 import { SafeError } from "../src/errors.js";
 import { startHttpServer } from "../src/http-server.js";
 import { saveSession } from "../src/session.js";
@@ -45,31 +46,87 @@ function lectureDetails(unitId, filename) {
   };
 }
 
-test("stdio download returns an absolute path for a 10.6 student file and refuses other units", async () => {
+test("a lecture download is a resource link and does not write the file", async () => {
   const directory = tempDir();
-  const script = scripted([
-    () => jsonResponse(200, lectureDetails(1, "slides.pdf")),
-    () => new Response(Buffer.from("pdf-bytes")),
-  ]);
+  const script = scripted([() => jsonResponse(200, lectureDetails(1, "slides.pdf"))]);
   const saved = await downloadAttachment(env(directory), 4, { unitId: 1 }, script.fetchImpl);
-  assert.equal(saved.download.bytes, 9);
-  assert.equal(saved.download.filename, "slides.pdf");
-  assert.equal(saved.download.mimeType, "application/pdf");
-  assert.equal(path.isAbsolute(saved.download.absolutePath), true);
-  assert.equal(fs.readFileSync(saved.download.absolutePath, "utf8"), "pdf-bytes");
-  assert.equal(saved.resource.mimeType, "application/pdf");
-  assert.equal(Buffer.from(saved.resource.blob, "base64").toString("utf8"), "pdf-bytes");
-  assert.equal(new URL(script.calls[1].href).pathname, "/api/core/files/attachments/attachment-video-units/1/student/slides.pdf");
+  assert.equal(saved.filename, "slides.pdf");
+  assert.equal(saved.mimeType, "application/pdf");
+  assert.equal(saved.uri, "artemis://files/attachments/attachment-video-units/1/student/slides.pdf");
+  assert.equal(saved.absolutePath, undefined);
+  assert.equal(script.calls.length, 1);
+  assert.equal(new URL(script.calls[0].href).pathname.endsWith("/details"), true);
+  assert.equal(fs.existsSync(path.join(directory, "downloads")), false);
   const blocked = scripted([() => jsonResponse(200, lectureDetails(1, "slides.pdf"))]);
   await assert.rejects(
     () => downloadAttachment(env(directory), 4, { unitId: 99 }, blocked.fetchImpl),
     (error) => error instanceof SafeError && error.code === "not_found",
   );
   assert.equal(blocked.calls.length, 1);
-  assert.equal(new URL(blocked.calls[0].href).pathname.endsWith("/details"), true);
 });
 
-test("http downloads return a one-time url for that user only", async () => {
+test("download_file names an announcement file and resources/read fetches it live", async () => {
+  const directory = tempDir();
+  const reference = "/api/core/files/courses/585/conversations/32119/FoP-SES01-Time-Allocation.pdf";
+  const named = await downloadFile(env(directory), `https://artemis.test${reference}`, scripted([]).fetchImpl);
+  assert.equal(named.path, reference);
+  assert.equal(named.uri, "artemis://files/courses/585/conversations/32119/FoP-SES01-Time-Allocation.pdf");
+  const script = scripted([() => new Response(Buffer.from("announcement-pdf")), () => new Response(Buffer.from("note"))]);
+  const read = await readStudentFile(env(directory), named.uri, script.fetchImpl);
+  assert.equal(read.mimeType, "application/pdf");
+  assert.equal(read.size, "announcement-pdf".length);
+  assert.equal(Buffer.from(read.blob, "base64").toString("utf8"), "announcement-pdf");
+  assert.equal(read.text, undefined);
+  assert.equal(new URL(script.calls[0].href).pathname, reference);
+  const note = await readStudentFile(env(directory), "artemis://files/markdown/note.txt", script.fetchImpl);
+  assert.equal(note.text, "note");
+  assert.equal(note.blob, undefined);
+  await assert.rejects(
+    () => downloadFile(env(directory), "https://other.test/api/core/files/markdown/a.png", scripted([]).fetchImpl),
+    (error) => error instanceof SafeError && error.code === "invalid_arguments",
+  );
+  const refused = scripted([]);
+  await assert.rejects(
+    () => readStudentFile(env(directory), "artemis://files/%2e%2e/secret.pdf", refused.fetchImpl),
+    (error) => error instanceof SafeError && error.code === "invalid_arguments",
+  );
+  assert.equal(refused.calls.length, 0);
+  await assert.rejects(
+    () => readStudentFile({ ARTEMIS_BASE_URL: "https://artemis.test", PLUGIN_ROOT: path.resolve(".") }, named.uri, scripted([]).fetchImpl),
+    (error) => error instanceof SafeError && error.code === "not_configured",
+  );
+});
+
+test("tools expose resource links and an http read uses that caller's session", async () => {
+  const uri = "artemis://files/markdown/sheet.pdf";
+  const file = { name: "sheet.pdf", filename: "sheet.pdf", path: "/api/core/files/markdown/sheet.pdf", uri, mimeType: "application/pdf" };
+  const handle = createMcpHandler({
+    getExercise: async () => ({ id: 1, problemStatement: "see", files: [file] }),
+    getLecture: async () => ({ id: 4, materials: [file] }),
+    listMessages: async () => [{ id: 1, content: "see", files: [file], answers: [] }],
+    listAnnouncements: async () => [{ id: 1, content: "see", files: [file] }],
+  });
+  await handle({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+  for (const [name, args] of [
+    ["get_exercise", { exerciseId: 1 }],
+    ["get_lecture", { lectureId: 4 }],
+    ["list_messages", { courseId: 7, conversationId: 9 }],
+    ["list_announcements", { courseId: 7 }],
+  ]) {
+    const response = await handle({ jsonrpc: "2.0", id: name, method: "tools/call", params: { name, arguments: args } });
+    const link = response.result.content.find((item) => item.type === "resource_link");
+    assert.equal(link.uri, uri, name);
+    assert.equal(link.name, "sheet.pdf", name);
+    assert.equal(link.mimeType, "application/pdf", name);
+    assert.equal(response.result.content.some((item) => item.type === "resource" || item.blob), false, name);
+  }
+  const listed = await handle({ jsonrpc: "2.0", id: "list", method: "resources/list" });
+  assert.deepEqual(listed.result.resources, []);
+  const templates = await handle({ jsonrpc: "2.0", id: "templates", method: "resources/templates/list" });
+  assert.equal(templates.result.resourceTemplates[0].uriTemplate, "artemis://files/{+path}");
+});
+
+test("http resources/read fetches live for that user and /files is gone", async () => {
   const directory = tempDir();
   const alpha = createAccessToken(directory, { label: "alpha" });
   const beta = createAccessToken(directory, { label: "beta" });
@@ -115,25 +172,28 @@ test("http downloads return a one-time url for that user only", async () => {
     const first = await downloadOverHttp(base, alpha.token, 1);
     const second = await downloadOverHttp(base, beta.token, 2);
     assert.equal(first.body.download.filename, "a.pdf");
-    assert.equal(first.body.download.downloadUrl.startsWith("https://mcp.example.com/files/"), true);
+    assert.equal(first.body.download.uri, "artemis://files/attachments/attachment-video-units/1/student/a.pdf");
+    assert.equal(first.link.type, "resource_link");
+    assert.equal(first.link.uri, first.body.download.uri);
     assert.equal(first.body.download.absolutePath, undefined);
-    assert.equal(second.body.download.downloadUrl.startsWith("https://mcp.example.com/files/"), true);
-    assert.equal(first.body.download.downloadUrl === second.body.download.downloadUrl, false);
-    assert.equal(JSON.stringify(second.body).includes(first.body.download.downloadUrl), false);
-    assert.equal(first.resource.mimeType, "application/pdf");
-    assert.equal(Buffer.from(first.resource.blob, "base64").toString("utf8"), "file-a");
-    const fetched = await fetch(first.body.download.downloadUrl.replace("https://mcp.example.com", base));
-    assert.equal(fetched.status, 200);
-    assert.equal(fetched.headers.get("content-type"), "application/pdf");
-    assert.match(fetched.headers.get("content-disposition"), /filename="a.pdf"/);
-    assert.equal(Buffer.from(await fetched.arrayBuffer()).toString("utf8"), "file-a");
-    const again = await fetch(first.body.download.downloadUrl.replace("https://mcp.example.com", base));
-    assert.equal(again.status, 404);
-    const other = await fetch(second.body.download.downloadUrl.replace("https://mcp.example.com", base));
-    assert.equal(Buffer.from(await other.arrayBuffer()).toString("utf8"), "file-b");
-    const guessed = first.body.download.downloadUrl.replace(/.$/, first.body.download.downloadUrl.endsWith("a") ? "b" : "a");
-    const missed = await fetch(guessed.replace("https://mcp.example.com", base));
-    assert.equal(missed.status, 404);
+    assert.equal(first.body.download.downloadUrl, undefined);
+    assert.equal(second.body.download.uri, "artemis://files/attachments/attachment-video-units/2/student/b.pdf");
+    const read = await readOverHttp(base, first.session, alpha.token, first.link.uri);
+    assert.equal(Buffer.from(read.result.contents[0].blob, "base64").toString("utf8"), "file-a");
+    const again = await readOverHttp(base, first.session, alpha.token, first.link.uri);
+    assert.equal(Buffer.from(again.result.contents[0].blob, "base64").toString("utf8"), "file-a");
+    const other = await readOverHttp(base, second.session, beta.token, second.body.download.uri);
+    assert.equal(Buffer.from(other.result.contents[0].blob, "base64").toString("utf8"), "file-b");
+    const refused = await readOverHttp(base, first.session, alpha.token, "artemis://files/%2e%2e/secret.pdf");
+    assert.equal(typeof refused.error.message, "string");
+    const anonymous = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: ACCEPT },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "resources/read", params: { uri: first.link.uri } }),
+    });
+    assert.equal(anonymous.status, 401);
+    const removed = await fetch(`${base}/files/${"a".repeat(43)}`);
+    assert.equal(removed.status, 404);
   } finally {
     await new Promise((resolve) => {
       server.close(() => resolve());
@@ -154,7 +214,20 @@ async function downloadOverHttp(base, token, unitId) {
     }),
   });
   const session = opened.headers.get("mcp-session-id");
-  const response = await fetch(`${base}/mcp`, {
+  const response = await rpc(base, token, session, "tools/call", {
+    name: "download_attachment",
+    arguments: { lectureId: 4, unitId },
+  });
+  assert.equal(response.result.isError, false);
+  return { session, body: JSON.parse(response.result.content[0].text), link: response.result.content[1] };
+}
+
+function readOverHttp(base, session, token, uri) {
+  return rpc(base, token, session, "resources/read", { uri });
+}
+
+function rpc(base, token, session, method, params) {
+  return fetch(`${base}/mcp`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
@@ -162,16 +235,8 @@ async function downloadOverHttp(base, token, unitId) {
       accept: ACCEPT,
       "mcp-session-id": session,
     },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: { name: "download_attachment", arguments: { lectureId: 4, unitId } },
-    }),
-  });
-  const body = await response.json();
-  assert.equal(body.result.isError, false);
-  return { body: JSON.parse(body.result.content[0].text), resource: body.result.content[1].resource };
+    body: JSON.stringify({ jsonrpc: "2.0", id: method, method, params }),
+  }).then((response) => response.json());
 }
 
 function scripted(handlers) {

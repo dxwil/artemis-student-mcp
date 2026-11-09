@@ -28,9 +28,29 @@ test("announcements keep display names and drop logins", async () => {
   const posts = await listAnnouncements(env(directory), 7, 0, script.fetchImpl);
   assert.equal(posts.length, 1);
   assert.equal(posts[0].authorName, "Ada");
+  assert.deepEqual(posts[0].files, []);
   assert.equal(JSON.stringify(posts).includes("student1"), false);
   assert.equal(script.calls.every((call) => call.method === "GET"), true);
   assert.equal(new URL(script.calls[1].href).searchParams.get("size"), "20");
+});
+
+test("announcements surface markdown file links", async () => {
+  const directory = tempDir();
+  const script = scriptedFetch([
+    () => jsonResponse(200, [{ id: 9, isAnnouncementChannel: true }]),
+    () =>
+      jsonResponse(200, [
+        {
+          id: 1,
+          title: "Session",
+          content: "Plan: [Time allocation](/api/core/files/courses/585/conversations/32119/FoP-SES01-Time-Allocation.pdf)",
+          author: { name: "Ada" },
+        },
+      ]),
+  ]);
+  const posts = await listAnnouncements(env(directory), 7, 0, script.fetchImpl);
+  assert.equal(posts[0].files[0].uri, "artemis://files/courses/585/conversations/32119/FoP-SES01-Time-Allocation.pdf");
+  assert.equal(posts[0].files[0].mimeType, "application/pdf");
 });
 
 test("a missing communication API is not enabled", async () => {

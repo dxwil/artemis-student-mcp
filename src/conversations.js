@@ -1,6 +1,7 @@
-import { studentGet } from "./auth.js";
+import { resolveConfig, studentGet } from "./auth.js";
 import { normalizeDate } from "./courses.js";
 import { SafeError } from "./errors.js";
+import { fileReferences } from "./files.js";
 import { requireId } from "./student-reads.js";
 
 const PAGE_SIZE = 20;
@@ -33,6 +34,7 @@ export async function listMessages(env, courseId, conversationId, page, fetchImp
   if (typeof pageNumber !== "number" || !Number.isInteger(pageNumber) || pageNumber < 0 || pageNumber > 20) {
     throw new SafeError("invalid_arguments", "page must be an integer from 0 through 20.");
   }
+  const origin = resolveConfig(env, nowMs).origin;
   const posts = await studentGet(env, `/api/communication/courses/${course}/messages`, fetchImpl, nowMs, {
     query: {
       courseId: String(course),
@@ -55,12 +57,14 @@ export async function listMessages(env, courseId, conversationId, page, fetchImp
       createdAt: normalizeDate(post.creationDate),
       authorName: displayName(post.author),
       content: bound(post.content),
+      files: fileReferences(bound(post.content), origin),
       answers: Array.isArray(post.answers)
         ? post.answers.slice(0, PAGE_SIZE).map((answer) => ({
             id: typeof answer?.id === "number" ? answer.id : null,
             createdAt: normalizeDate(answer?.creationDate),
             authorName: displayName(answer?.author),
             content: bound(answer?.content),
+            files: fileReferences(bound(answer?.content), origin),
           }))
         : [],
     }));

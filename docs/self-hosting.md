@@ -86,7 +86,7 @@ The password is discarded after the Artemis login call. The Artemis session is s
 
 A confirmation token for a write lives in that account's directory. It cannot be used with another person's access token.
 
-`download_attachment` does not ask a remote client to read the server's disk. Over HTTP the tool result includes the file as a base64 resource when it is at most 2 MB, and a download URL on this server's public origin. The URL is an unguessable token for that user, lasts 10 minutes, is deleted after it is fetched, and is not reusable. A local stdio client instead receives an absolute path under its data directory. Files older than a day are removed from that directory.
+`download_file`, lecture materials, and file links in posts and problem statements return an MCP `resource_link` whose URI is `artemis://files/` plus the path relative to `api/core/files/`. The same URI works over stdio and HTTP. `resources/read` checks the student file allowlist, then fetches the bytes from Artemis with that caller's own session. The server does not write the file to disk and does not publish a download URL. A read without a signed-in session is rejected. Other hosts and paths outside the student file prefixes are refused before any request.
 
 ## What is stored
 

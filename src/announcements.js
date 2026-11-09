@@ -1,6 +1,7 @@
-import { studentGet } from "./auth.js";
+import { resolveConfig, studentGet } from "./auth.js";
 import { normalizeDate } from "./courses.js";
 import { SafeError } from "./errors.js";
+import { fileReferences } from "./files.js";
 import { requireId } from "./student-reads.js";
 
 const PAGE_SIZE = 20;
@@ -19,6 +20,7 @@ export async function listAnnouncements(env, courseId, page, fetchImpl, nowMs = 
   if (!channel) {
     return [];
   }
+  const origin = resolveConfig(env, nowMs).origin;
   const posts = await studentGet(env, `/api/communication/courses/${id}/messages`, fetchImpl, nowMs, {
     query: {
       courseId: String(id),
@@ -40,6 +42,7 @@ export async function listAnnouncements(env, courseId, page, fetchImpl, nowMs = 
       channelId: channel.id,
       title: optionalShort(post.title),
       content: optionalBounded(post.content),
+      files: fileReferences(optionalBounded(post.content), origin),
       createdAt: normalizeDate(post.creationDate),
       authorName: displayName(post.author),
     }));
