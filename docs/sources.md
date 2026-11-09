@@ -193,6 +193,25 @@ The record and the entity both use `@JsonInclude(NON_EMPTY)`, so a null date is 
 
 Dates are copied as the server sent them. They are not reformatted.
 
+## Student files and account
+
+`GET /api/core/public/account` is `PublicAccountResource.getAccount` at `api/core/public/`. The body is `UserDTO`. The plugin copies login, first name, last name, the server display name, email, `visibleRegistrationNumber` (falling back to `registrationNumber` when that is the field an older server sends), `langKey`, `groups`, and `courseRoles`. Artemis 10.6 puts course membership on `courseRoles` and does not send a `groups` array. Tokens, the password field, authorities, and the VCS access token are not copied.
+
+`download_file` accepts a URL on the configured origin, an absolute `/api/core/files/...` path, or a path relative to `api/core/files/`. After decoding, the path must match a student `GET` on `FileResource` at this commit:
+
+| Prefix under `api/core/files/` | Who may call it |
+| --- | --- |
+| `attachments/lectures/{lectureId}/{name}` | student |
+| `attachments/attachment-video-units/{id}/student/{name}` | student |
+| `attachments/attachment-video-units/{id}/slide/{n}` and `slides/{id}` | student |
+| `courses/{courseId}/conversations/{conversationId}/{name}` | student in the course |
+| `courses/{courseId}/icons/{name}` | student |
+| `markdown/{name}` | student |
+| `drag-and-drop/questions/{id}/backgrounds/{name}` and `.../drag-items/{id}/{name}` | student |
+| `file-upload-exercises/{exerciseId}/submissions/{submissionId}/{name}` | student; Artemis still checks that the submission is the caller's |
+
+The tutor file `attachments/attachment-video-units/{id}/{name}` (no `student` segment), profile pictures, and exam-user images are not accepted. `..` and percent-encoded `..` are rejected before a request is sent. `download_attachment` still resolves a lecture `unitId` or `attachmentId` and then uses the same delivery.
+
 ## Instructor MCP, not used
 
 [Agent access](https://docs.artemis.tum.de/admin/agent-access/) documents `POST /api/core/agent/mcp` and personal access tokens. The same commit's `AgentMcpResource` accepts only a `PersonalAccessTokenAuthentication`. The documentation says only instructors and editors can create tokens, and a token cannot turn a student into an editor. This plugin does not call that endpoint and does not send `art_pat_` tokens to the student course API.

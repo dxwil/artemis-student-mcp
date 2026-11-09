@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { createAccessToken, userDirectory } from "../src/access.js";
-import { downloadAttachment } from "../src/downloads.js";
+import { downloadAttachment, downloadFile } from "../src/downloads.js";
 import { SafeError } from "../src/errors.js";
 import { startHttpServer } from "../src/http-server.js";
 import { saveSession } from "../src/session.js";
@@ -67,6 +67,26 @@ test("stdio download returns an absolute path for a 10.6 student file and refuse
   );
   assert.equal(blocked.calls.length, 1);
   assert.equal(new URL(blocked.calls[0].href).pathname.endsWith("/details"), true);
+});
+
+test("download_file fetches an announcement attachment from any of the three path forms", async () => {
+  const directory = tempDir();
+  const reference = "/api/core/files/courses/585/conversations/32119/FoP-SES01-Time-Allocation.pdf";
+  const script = scripted([() => new Response(Buffer.from("announcement-pdf"))]);
+  const saved = await downloadFile(env(directory), `https://artemis.test${reference}`, script.fetchImpl);
+  assert.equal(saved.download.path, reference);
+  assert.equal(saved.download.filename, "FoP-SES01-Time-Allocation.pdf");
+  assert.equal(fs.readFileSync(saved.download.absolutePath, "utf8"), "announcement-pdf");
+  assert.equal(saved.download.absolutePath.includes(`${path.sep}downloads${path.sep}files${path.sep}`), true);
+  assert.equal(new URL(script.calls[0].href).pathname, reference);
+  await assert.rejects(
+    () => downloadFile(env(directory), "https://other.test/api/core/files/markdown/a.png", scripted([]).fetchImpl),
+    (error) => error instanceof SafeError && error.code === "invalid_arguments",
+  );
+  await assert.rejects(
+    () => downloadFile(env(directory), "/api/core/files/%2e%2e/secret.pdf", scripted([]).fetchImpl),
+    (error) => error instanceof SafeError && error.code === "invalid_arguments",
+  );
 });
 
 test("http downloads return a one-time url for that user only", async () => {

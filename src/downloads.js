@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { studentGetBytes } from "./auth.js";
+import { resolveConfig, studentGetBytes } from "./auth.js";
 import { SafeError } from "./errors.js";
+import { normalizeStudentFilePath } from "./files.js";
 import { resolveTokenFile } from "./session.js";
 import { findLectureDownload, getLecture } from "./student-reads.js";
 
@@ -23,19 +24,31 @@ const MIME = {
   mp4: "video/mp4",
 };
 
+export async function downloadFile(env, reference, fetchImpl, nowMs = Date.now(), hooks = {}) {
+  return fetchStudentFile(env, reference, fetchImpl, nowMs, hooks, "files", {});
+}
+
 export async function downloadAttachment(env, lectureId, selector, fetchImpl, nowMs = Date.now(), hooks = {}) {
   const lecture = await getLecture(env, lectureId, null, fetchImpl, nowMs);
   const material = findLectureDownload(lecture, selector ?? {});
-  const bytes = await studentGetBytes(env, material.path, fetchImpl, nowMs);
-  const filename = material.filename || "attachment";
+  return fetchStudentFile(env, material.path, fetchImpl, nowMs, hooks, String(lecture.id), {
+    unitId: material.kind === "attachment" ? material.id : undefined,
+    attachmentId: material.attachmentId ?? (material.kind === "lecture-attachment" ? material.id : undefined),
+  });
+}
+
+async function fetchStudentFile(env, reference, fetchImpl, nowMs, hooks, bucket, extra) {
+  const normalized = normalizeStudentFilePath(reference, resolveConfig(env, nowMs).origin);
+  const bytes = await studentGetBytes(env, normalized.path, fetchImpl, nowMs);
+  const filename = safeStoredName(normalized.filename);
   const mimeType = mimeOf(filename);
-  const absolutePath = writeDownload(env, lecture.id, filename, bytes);
+  const absolutePath = writeDownload(env, bucket, filename, bytes);
   const download = {
     bytes: bytes.length,
     filename,
     mimeType,
-    unitId: material.kind === "attachment" ? material.id : undefined,
-    attachmentId: material.attachmentId ?? (material.kind === "lecture-attachment" ? material.id : undefined),
+    path: normalized.path,
+    ...extra,
   };
   let resource = null;
   if (bytes.length <= EMBED_LIMIT) {
@@ -93,6 +106,14 @@ function sweepOld(directory) {
       // A file removed between the listing and the stat is already gone.
     }
   }
+}
+
+function safeStoredName(filename) {
+  const cleaned = String(filename).replace(/[\u0000-\u001f]/g, "").replace(/[/\\]/g, "").slice(0, 180);
+  if (cleaned === "" || cleaned === "." || cleaned === "..") {
+    throw new SafeError("invalid_arguments", "The attachment name is not a safe filename.");
+  }
+  return cleaned;
 }
 
 function mimeOf(filename) {

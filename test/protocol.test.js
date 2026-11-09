@@ -117,7 +117,7 @@ test("stdio handshake lists only list_courses and returns normalized courses", a
   assert.equal(initialized.result.serverInfo.name, "artemis-student");
   assert.deepEqual(
     tools.result.tools.map((tool) => tool.name),
-    ["list_courses", "list_exercises", "get_exercise", "list_lectures", "get_lecture", "list_announcements", "list_results", "get_feedback", "list_calendar", "list_exams", "get_exam_result", "list_conversations", "list_messages", "download_attachment",
+    ["get_account", "list_courses", "list_exercises", "get_exercise", "list_lectures", "get_lecture", "list_announcements", "list_results", "get_feedback", "list_calendar", "list_exams", "get_exam_result", "list_conversations", "list_messages", "download_file", "download_attachment",
     "list_tutorial_groups",
     "list_competencies",
     "get_learning_path",
@@ -334,6 +334,7 @@ test("every student read answers over tools/call and stays on GET", async () => 
     ["get_exam_result", { courseId: 7, examId: 5, studentExamId: 6 }, "examResult"],
     ["list_conversations", { courseId: 7 }, "conversations"],
     ["list_messages", { courseId: 7, conversationId: 9, page: 0 }, "messages"],
+    ["download_file", { path: "/api/core/files/attachments/attachment-video-units/1/student/slides.pdf" }, "download"],
     ["download_attachment", { lectureId: 4, unitId: 1 }, "download"],
     ["list_tutorial_groups", { courseId: 7 }, "tutorialGroups"],
     ["list_competencies", { courseId: 7 }, "competencies"],

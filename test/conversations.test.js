@@ -39,6 +39,8 @@ test("conversations and messages drop logins and bound the page", async () => {
   ]);
   const posts = await listMessages(state, 7, 4, 0, messages.fetchImpl);
   assert.equal(posts[0].authorName, "Ada");
+  assert.deepEqual(posts[0].files, []);
+  assert.deepEqual(posts[0].answers[0].files, []);
   assert.equal(posts[0].answers[0].authorName, "Bea");
   assert.equal(JSON.stringify(posts).includes("student1"), false);
   assert.equal(JSON.stringify(posts).includes("student2"), false);

@@ -1,8 +1,9 @@
+import { getAccount } from "./account.js";
 import { listCourses } from "./auth.js";
 import { listAnnouncements } from "./announcements.js";
 import { getLearningPath, listCompetencies, listFaqs, listNotifications, listTutorialGroups } from "./course-info.js";
 import { listConversations, listMessages } from "./conversations.js";
-import { downloadAttachment } from "./downloads.js";
+import { downloadAttachment, downloadFile } from "./downloads.js";
 import { markConversationRead, markNotificationsRead } from "./mark-read.js";
 import { createPost, replyToPost } from "./posting.js";
 import { getExamResult, listCalendar, listExams } from "./schedule.js";
@@ -12,6 +13,7 @@ import { submitFile, submitQuiz, submitText } from "./submissions.js";
 
 export function createToolImpl(env, fetchImpl = globalThis.fetch, hooks = {}) {
   return {
+    getAccount: () => getAccount(env, fetchImpl),
     listCourses: () => listCourses(env, fetchImpl),
     listExercises: (courseId) => listExercises(env, courseId, fetchImpl),
     getExercise: (exerciseId, courseId) => getExercise(env, exerciseId, courseId, fetchImpl),
@@ -25,6 +27,7 @@ export function createToolImpl(env, fetchImpl = globalThis.fetch, hooks = {}) {
     getExamResult: (courseId, examId, studentExamId) => getExamResult(env, courseId, examId, studentExamId, fetchImpl),
     listConversations: (courseId) => listConversations(env, courseId, fetchImpl),
     listMessages: (courseId, conversationId, page) => listMessages(env, courseId, conversationId, page, fetchImpl),
+    downloadFile: (reference) => downloadFile(env, reference, fetchImpl, Date.now(), hooks),
     downloadAttachment: (lectureId, unitId, attachmentId) => downloadAttachment(env, lectureId, { unitId, attachmentId }, fetchImpl, Date.now(), hooks),
     listTutorialGroups: (courseId) => listTutorialGroups(env, courseId, fetchImpl),
     listCompetencies: (courseId) => listCompetencies(env, courseId, fetchImpl),

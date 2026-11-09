@@ -87,6 +87,25 @@ export async function main(argv = process.argv.slice(2), env = process.env, fetc
       }
       return 0;
     }
+    if (command === "account") {
+      rejectExtra(argv.slice(1), "Usage: artemis-student-auth account");
+      requireSession(env);
+      const body = await callToolOverMcp(env, "get_account", {});
+      process.stdout.write(`${body.account.login}\n`);
+      return 0;
+    }
+    if (command === "file") {
+      const reference = argv[1];
+      rejectExtra(argv.slice(2), "Usage: artemis-student-auth file <path>");
+      if (typeof reference !== "string" || reference.trim() === "") {
+        process.stderr.write("Usage: artemis-student-auth file <path>\n");
+        return 1;
+      }
+      requireSession(env);
+      const body = await callToolOverMcp(env, "download_file", { path: reference });
+      process.stdout.write(`downloaded: ${body.download.bytes}\n`);
+      return 0;
+    }
     if (command === "download") {
       const parsed = parseDownload(argv.slice(1));
       requireSession(env);
@@ -203,7 +222,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, fetc
       writeStatus(env);
       return 0;
     }
-    process.stderr.write("Usage: artemis-student-auth <login|courses|exercises|exercise|lectures|lecture|announcements|results|feedback|calendar|exams|conversations|messages|download|tutorials|competencies|learning-path|faqs|notifications|mark-notifications|mark-conversation|post|reply|submit-text|submit-file|submit-quiz|logout|status>\n");
+    process.stderr.write("Usage: artemis-student-auth <login|courses|account|exercises|exercise|lectures|lecture|announcements|results|feedback|calendar|exams|conversations|messages|file|download|tutorials|competencies|learning-path|faqs|notifications|mark-notifications|mark-conversation|post|reply|submit-text|submit-file|submit-quiz|logout|status>\n");
     return 1;
   } catch (error) {
     const safe = error instanceof SafeError ? error : new SafeError("internal", "The command could not be completed.");

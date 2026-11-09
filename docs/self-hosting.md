@@ -86,7 +86,7 @@ The password is discarded after the Artemis login call. The Artemis session is s
 
 A confirmation token for a write lives in that account's directory. It cannot be used with another person's access token.
 
-`download_attachment` does not ask a remote client to read the server's disk. Over HTTP the tool result includes the file as a base64 resource when it is at most 2 MB, and a download URL on this server's public origin. The URL is an unguessable token for that user, lasts 10 minutes, is deleted after it is fetched, and is not reusable. A local stdio client instead receives an absolute path under its data directory. Files older than a day are removed from that directory.
+`download_file` and its lecture alias `download_attachment` do not ask a remote client to read the server's disk. Over HTTP the tool result includes the file as a base64 resource when it is at most 2 MB, and a download URL on this server's public origin. The URL is an unguessable token for that user, lasts 10 minutes, is deleted after it is fetched, and is not reusable. A local stdio client instead receives an absolute path under its data directory. Files older than a day are removed from that directory. The path must be a student file on the configured Artemis origin. Other hosts and paths outside the student file prefixes are refused before any request.
 
 ## What is stored
 
