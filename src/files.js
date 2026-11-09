@@ -16,8 +16,26 @@ const ALLOWED = [
   /^\/api\/core\/files\/file-upload-exercises\/\d+\/submissions\/\d+\/[^/]+$/,
 ];
 
+const FILE_URI = "artemis://files/";
+
+const MIME = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  txt: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  json: "application/json",
+  zip: "application/zip",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  mp4: "video/mp4",
+};
+
 export function normalizeStudentFilePath(input, origin) {
-  if (typeof input !== "string" || typeof origin !== "string") {
+  if (typeof input !== "string") {
     throw new SafeError("invalid_arguments", INVALID);
   }
   const trimmed = input.trim();
@@ -38,10 +56,41 @@ export function normalizeStudentFilePath(input, origin) {
   if (!ALLOWED.some((pattern) => pattern.test(plain))) {
     throw new SafeError("invalid_arguments", INVALID);
   }
+  const path = `${PREFIX}${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
   return {
-    path: `${PREFIX}${segments.map((segment) => encodeURIComponent(segment)).join("/")}`,
+    path,
     filename: segments.at(-1),
+    uri: `${FILE_URI}${path.slice(PREFIX.length)}`,
+    mimeType: mimeOf(segments.at(-1)),
   };
+}
+
+export function describeStudentFile(reference, origin, name) {
+  const normalized = normalizeStudentFilePath(reference, origin);
+  const label = typeof name === "string" && name.trim() !== "" ? name.trim().slice(0, 200) : normalized.filename;
+  return {
+    name: label,
+    filename: normalized.filename,
+    path: normalized.path,
+    uri: normalized.uri,
+    mimeType: normalized.mimeType,
+  };
+}
+
+export function pathFromFileUri(uri) {
+  if (typeof uri !== "string" || !uri.startsWith(FILE_URI) || uri.length > 2200) {
+    throw new SafeError("invalid_arguments", INVALID);
+  }
+  const relative = uri.slice(FILE_URI.length);
+  if (relative === "" || relative.startsWith("/") || relative.includes("?") || relative.includes("#") || relative.includes("\\")) {
+    throw new SafeError("invalid_arguments", INVALID);
+  }
+  return relative;
+}
+
+export function mimeOf(filename) {
+  const extension = String(filename).toLowerCase().split(".").pop();
+  return MIME[extension] ?? "application/octet-stream";
 }
 
 export function fileReferences(content, origin) {
@@ -65,7 +114,7 @@ export function fileReferences(content, origin) {
     }
     seen.add(normalized.path);
     const name = match[1].trim();
-    found.push({ name: (name === "" ? normalized.filename : name).slice(0, 200), path: normalized.path });
+    found.push(describeStudentFile(normalized.path, origin, name === "" ? normalized.filename : name));
     if (found.length === 20) {
       break;
     }
@@ -75,6 +124,9 @@ export function fileReferences(content, origin) {
 
 function pathnameOf(value, origin) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    if (typeof origin !== "string") {
+      throw new SafeError("invalid_arguments", INVALID);
+    }
     let url;
     try {
       url = new URL(value);

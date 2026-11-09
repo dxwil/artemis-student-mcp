@@ -8,7 +8,7 @@ Grep of `*.service.ts` under `src/main/webapp/app` in Artemis 10.6 (`43b26a1d892
 | `GET /api/course/courses/for-dashboard` | Covered by `list_courses` |
 | Exercises for overview, exercise details, problem statement | Covered by `list_exercises` and `get_exercise` |
 | Lectures for overview and lecture details | Covered by `list_lectures` and `get_lecture` |
-| Student files under `api/core/files/` (lectures, conversations, markdown, drag-and-drop, own file-upload submissions, slides, course icons) | Covered by `download_file`. `download_attachment` remains the lecture-id alias |
+| Student files under `api/core/files/` (lectures, conversations, markdown, drag-and-drop, own file-upload submissions, slides, course icons) | Covered by `download_file` and `resources/read`. `download_attachment` remains the lecture-id alias |
 | Announcement channel and conversation messages | Covered by `list_announcements`, `list_conversations`, and `list_messages`. Markdown file links are returned as `files` |
 | Create a post and an answer | Covered by `create_post` and `reply_to_post` |
 | Mark a conversation read | Covered by `mark_conversation_read` |

@@ -62,7 +62,19 @@ test("message markdown keeps only student file links", () => {
     "and [tutor](/api/core/files/attachments/attachment-video-units/12/slides.pdf).",
   ].join(" ");
   assert.deepEqual(fileReferences(content, ORIGIN), [
-    { name: "Time allocation", path: PDF },
-    { name: "slides", path: "/api/core/files/attachments/attachment-video-units/12/student/slides.pdf" },
+    {
+      name: "Time allocation",
+      filename: "FoP-SES01-Time-Allocation.pdf",
+      path: PDF,
+      uri: "artemis://files/courses/585/conversations/32119/FoP-SES01-Time-Allocation.pdf",
+      mimeType: "application/pdf",
+    },
+    {
+      name: "slides",
+      filename: "slides.pdf",
+      path: "/api/core/files/attachments/attachment-video-units/12/student/slides.pdf",
+      uri: "artemis://files/attachments/attachment-video-units/12/student/slides.pdf",
+      mimeType: "application/pdf",
+    },
   ]);
 });

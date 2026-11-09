@@ -53,7 +53,7 @@ const LIST_EXERCISES = {
 const GET_EXERCISE = {
   name: "get_exercise",
   description:
-    "Read one student-visible course exercise. Returns the problem statement and release, start, and due dates. Does not return grades, results, example solutions, or exam exercises. Optional courseId checks the exercise belongs to that course. Read-only.",
+    "Read one student-visible course exercise. Returns the problem statement, release, start, and due dates, and a resource_link for each student file linked from the statement. Read those bytes with resources/read. Does not return grades, results, example solutions, or exam exercises. Optional courseId checks the exercise belongs to that course. Read-only.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -77,7 +77,7 @@ const LIST_LECTURES = {
 const GET_LECTURE = {
   name: "get_lecture",
   description:
-    "Read one lecture and student-visible materials. Attachment materials include unitId, attachmentId, filename, and a same-origin path when Artemis stores the file. Pass that path to download_file, or pass unitId to download_attachment. Hidden units are omitted. Read-only. Does not mark units complete.",
+    "Read one lecture and student-visible materials. Stored files include a resource_link uri (artemis://files/...). Read the bytes with resources/read. Hidden units are omitted. Read-only. Does not mark units complete.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -166,7 +166,7 @@ const LIST_MESSAGES = {
 const DOWNLOAD_FILE = {
   name: "download_file",
   description:
-    "Download one student-accessible Artemis file. path may be a full https URL on this server, an absolute /api/core/files/... path, or the relative form Artemis returns under api/core/files/. Allowed files are lecture attachments, conversation and announcement files, problem-statement files, the student's own file-upload submissions, slide images, and course icons. Read-only. Does not fetch other hosts or other paths.",
+    "Point at one student-accessible Artemis file. path may be a full https URL on this server, an absolute /api/core/files/... path, or the relative form Artemis returns under api/core/files/. The result is a resource_link with uri artemis://files/<path>. Read the bytes with resources/read. Allowed files are lecture attachments, conversation and announcement files, problem-statement files, the student's own file-upload submissions, slide images, and course icons. Read-only. Does not fetch other hosts or other paths.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -178,7 +178,7 @@ const DOWNLOAD_FILE = {
 const DOWNLOAD_ATTACHMENT = {
   name: "download_attachment",
   description:
-    "Download one student-visible lecture file. Thin alias for download_file: pass lectureId and the material's unitId, or lectureId and attachmentId for a lecture-level file. The server resolves the same-origin student path. Read-only.",
+    "Point at one student-visible lecture file. Thin alias for download_file: pass lectureId and the material's unitId, or lectureId and attachmentId for a lecture-level file. The result is a resource_link. Read the bytes with resources/read. Read-only.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -388,7 +388,10 @@ export function createMcpHandler(impl) {
         initialized = true;
         return result(id ?? null, {
           protocolVersion,
-          capabilities: { tools: { listChanged: false } },
+          capabilities: {
+            tools: { listChanged: false },
+            resources: { subscribe: false, listChanged: false },
+          },
           serverInfo: { name: "artemis-student", version: SERVER_VERSION },
         });
       }
@@ -403,6 +406,32 @@ export function createMcpHandler(impl) {
       }
       if (message.method === "tools/call") {
         return result(id ?? null, await callTool(message.params, impl));
+      }
+      if (message.method === "resources/list") {
+        return result(id ?? null, { resources: [] });
+      }
+      if (message.method === "resources/templates/list") {
+        return result(id ?? null, {
+          resourceTemplates: [
+            {
+              uriTemplate: "artemis://files/{+path}",
+              name: "artemis-file",
+              description:
+                "A student-accessible file on the configured Artemis server. path is relative to api/core/files/. Read it with resources/read. The server fetches the bytes with the caller's Artemis session and does not store them.",
+            },
+          ],
+        });
+      }
+      if (message.method === "resources/read") {
+        try {
+          return result(id ?? null, await readResource(message.params, impl));
+        } catch (error) {
+          const safe = asSafe(error);
+          if (safe.code === "internal") {
+            return rpcError(id ?? null, -32603, "Internal error");
+          }
+          return rpcError(id ?? null, -32000, safe.message);
+        }
       }
       return rpcError(id ?? null, -32601, "Method not found");
     } catch {
@@ -424,9 +453,9 @@ async function callTool(params, impl) {
   try {
     const payload = await dispatch(name, args, impl);
     if (payload && payload.__download) {
-      return downloadContent(payload.__download);
+      return withFileLinks({ download: payload.__download });
     }
-    return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }], isError: false };
+    return withFileLinks(payload);
   } catch (error) {
     const safe = asSafe(error);
     return toolError(safe.code, safe.message);
@@ -566,12 +595,58 @@ function hasSecretKey(args) {
   return Object.keys(args).some((key) => ["password", "token", "cookie", "authorization", "access_token"].includes(key.toLowerCase()));
 }
 
-function downloadContent(outcome) {
-  const content = [{ type: "text", text: JSON.stringify({ download: outcome.download }, null, 2) }];
-  if (outcome.resource) {
-    content.push({ type: "resource", resource: outcome.resource });
+async function readResource(params, impl) {
+  const uri = params && typeof params === "object" ? params.uri : undefined;
+  if (typeof uri !== "string") {
+    throw new SafeError("invalid_arguments", "The file reference is not a student file on this Artemis server.");
+  }
+  const file = await impl.readFile(uri);
+  const content = { uri: file.uri, mimeType: file.mimeType };
+  if (typeof file.text === "string") {
+    content.text = file.text;
+  } else {
+    content.blob = file.blob;
+  }
+  return { contents: [content] };
+}
+
+function withFileLinks(payload) {
+  const content = [{ type: "text", text: JSON.stringify(payload, null, 2) }];
+  const seen = new Set();
+  for (const file of collectFileLinks(payload)) {
+    if (seen.has(file.uri)) {
+      continue;
+    }
+    seen.add(file.uri);
+    const name = typeof file.name === "string" && file.name.trim() !== "" ? file.name.trim() : file.filename;
+    const link = { type: "resource_link", uri: file.uri, name: String(name).slice(0, 200) };
+    if (typeof file.mimeType === "string" && file.mimeType !== "") {
+      link.mimeType = file.mimeType;
+    }
+    if (Number.isSafeInteger(file.size) && file.size >= 0) {
+      link.size = file.size;
+    }
+    content.push(link);
+    if (content.length > 40) {
+      break;
+    }
   }
   return { content, isError: false };
+}
+
+function collectFileLinks(value, found = []) {
+  if (!value || typeof value !== "object") {
+    return found;
+  }
+  if (typeof value.uri === "string" && value.uri.startsWith("artemis://files/")) {
+    found.push(value);
+  }
+  for (const child of Object.values(value)) {
+    if (child && typeof child === "object") {
+      collectFileLinks(child, found);
+    }
+  }
+  return found;
 }
 
 function toolError(code, message) {

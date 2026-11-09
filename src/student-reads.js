@@ -1,6 +1,7 @@
 import { studentGet } from "./auth.js";
 import { normalizeDate } from "./courses.js";
 import { SafeError } from "./errors.js";
+import { describeStudentFile, fileReferences } from "./files.js";
 import { normalizeOrigin } from "./origin.js";
 import { resolveConfiguredOrigin } from "./profiles.js";
 
@@ -25,7 +26,8 @@ export async function getExercise(env, exerciseId, courseId, fetchImpl, nowMs = 
   const id = requireId(exerciseId);
   const scopedCourse = courseId == null ? null : requireId(courseId);
   const payload = await studentGet(env, `/api/exercise/exercises/${id}`, fetchImpl, nowMs);
-  return normalizeExerciseDetail(payload, scopedCourse, nowMs);
+  const origin = normalizeOrigin(resolveConfiguredOrigin(env));
+  return normalizeExerciseDetail(payload, scopedCourse, nowMs, origin);
 }
 
 export async function listLectures(env, courseId, fetchImpl, nowMs = Date.now()) {
@@ -59,7 +61,7 @@ export function normalizeExerciseList(payload, courseId, nowMs) {
   return sortById(exercises);
 }
 
-export function normalizeExerciseDetail(payload, courseId, nowMs) {
+export function normalizeExerciseDetail(payload, courseId, nowMs, origin) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new SafeError("malformed", MALFORMED);
   }
@@ -73,6 +75,7 @@ export function normalizeExerciseDetail(payload, courseId, nowMs) {
   if (courseId != null && course != null && course !== courseId) {
     throw new SafeError("forbidden", "The exercise is not in the requested course.");
   }
+  const problemStatement = optionalText(payload.problemStatement);
   return {
     id: requirePayloadId(payload.id),
     courseId: course ?? courseId,
@@ -81,7 +84,8 @@ export function normalizeExerciseDetail(payload, courseId, nowMs) {
     releaseDate: normalizeDate(payload.releaseDate),
     startDate: normalizeDate(payload.startDate),
     dueDate: normalizeDate(payload.dueDate),
-    problemStatement: optionalText(payload.problemStatement),
+    problemStatement,
+    files: typeof origin === "string" ? fileReferences(problemStatement ?? "", origin) : [],
   };
 }
 
@@ -241,6 +245,11 @@ function attachmentFields(attachment, scope) {
   if (stored?.path) {
     fields.path = stored.path;
     fields.filename = stored.filename;
+    const link = storedFileLink(stored.path, stored.filename);
+    if (link) {
+      fields.uri = link.uri;
+      fields.mimeType = link.mimeType;
+    }
   } else if (stored?.url) {
     fields.url = stored.url;
     fields.filename = stored.filename;
@@ -248,6 +257,17 @@ function attachmentFields(attachment, scope) {
     fields.filename = attachment.name;
   }
   return fields;
+}
+
+function storedFileLink(filePath, filename) {
+  try {
+    return describeStudentFile(filePath, undefined, filename);
+  } catch (error) {
+    if (error instanceof SafeError && error.code === "invalid_arguments") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 function storedAttachment(value, scope, studentVersion) {

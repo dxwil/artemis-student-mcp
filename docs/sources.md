@@ -128,7 +128,7 @@ Still pinned to `43b26a1d892d7bb3d03c40af9d2829516894bc50`. Domain calls are GET
 - Results: `studentParticipations` on `GET /api/course/courses/{courseId}/exercises-for-overview`, only results with `completionDate`. Feedback: `GET /api/assessment/participations/{participationId}/results/{resultId}/details`.
 - Calendar: `GET /api/calendar/courses/{courseId}/calendar-events`. The subscription-token route is not called. Exam dates: `GET /api/exam/courses/{courseId}/exams-for-overview`. That DTO has no seat. Released grade: `GET /api/exam/courses/{courseId}/exams/{examId}/student-exams/{studentExamId}/grade-summary`. `own-student-exam` is not called.
 - Conversations: `GET /api/communication/courses/{courseId}/conversations` and the messages GET above. Unread, reaction, and post routes are not called.
-- Attachment bytes: `GET /api/core/files/attachments/attachment-video-units/{unitId}/student/{filename}` for a visible attachment unit, or `GET /api/core/files/attachments/lectures/{lectureId}/{filename}` for a visible lecture-level file. The tool selects the path from the lecture details. A caller-supplied path is not fetched.
+- File bytes: `resources/read` calls `GET /api/core/files/<allowlisted path>` with the caller's session. Lecture tools still choose the student path from the lecture details. A path outside the student prefixes is not requested.
 - Tutorial groups: `GET /api/tutorialgroup/courses/{courseId}/tutorial-groups`. Competencies: `GET /api/atlas/courses/{courseId}/competencies`. Learning path: `GET /api/atlas/courses/{courseId}/learning-path/me`. FAQs: `GET /api/communication/courses/{courseId}/faqs`, keeping `ACCEPTED` only. Notifications: `GET /api/notification/courses/{courseId}`. The seen-status update route is not called.
 
 ## Student writes
@@ -210,7 +210,7 @@ Dates are copied as the server sent them. They are not reformatted.
 | `drag-and-drop/questions/{id}/backgrounds/{name}` and `.../drag-items/{id}/{name}` | student |
 | `file-upload-exercises/{exerciseId}/submissions/{submissionId}/{name}` | student; Artemis still checks that the submission is the caller's |
 
-The tutor file `attachments/attachment-video-units/{id}/{name}` (no `student` segment), profile pictures, and exam-user images are not accepted. `..` and percent-encoded `..` are rejected before a request is sent. `download_attachment` still resolves a lecture `unitId` or `attachmentId` and then uses the same delivery.
+The tutor file `attachments/attachment-video-units/{id}/{name}` (no `student` segment), profile pictures, and exam-user images are not accepted. `..` and percent-encoded `..` are rejected before a request is sent. `download_attachment` still resolves a lecture `unitId` or `attachmentId`. The tool result is a `resource_link` (`artemis://files/<relative path>`). `resources/read` fetches those bytes with the caller's session at read time. The server does not store the file.
 
 ## Instructor MCP, not used
 

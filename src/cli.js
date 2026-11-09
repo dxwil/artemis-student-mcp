@@ -103,14 +103,14 @@ export async function main(argv = process.argv.slice(2), env = process.env, fetc
       }
       requireSession(env);
       const body = await callToolOverMcp(env, "download_file", { path: reference });
-      process.stdout.write(`downloaded: ${body.download.bytes}\n`);
+      process.stdout.write(`${body.download.uri}\n`);
       return 0;
     }
     if (command === "download") {
       const parsed = parseDownload(argv.slice(1));
       requireSession(env);
       const body = await callToolOverMcp(env, "download_attachment", { lectureId: parsed.lectureId, unitId: parsed.unitId, attachmentId: parsed.attachmentId });
-      process.stdout.write(`downloaded: ${body.download.bytes}\n`);
+      process.stdout.write(`${body.download.uri}\n`);
       if (parsed.show) {
         process.stdout.write(`${JSON.stringify(body.download)}\n`);
       }

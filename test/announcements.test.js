@@ -49,12 +49,8 @@ test("announcements surface markdown file links", async () => {
       ]),
   ]);
   const posts = await listAnnouncements(env(directory), 7, 0, script.fetchImpl);
-  assert.deepEqual(posts[0].files, [
-    {
-      name: "Time allocation",
-      path: "/api/core/files/courses/585/conversations/32119/FoP-SES01-Time-Allocation.pdf",
-    },
-  ]);
+  assert.equal(posts[0].files[0].uri, "artemis://files/courses/585/conversations/32119/FoP-SES01-Time-Allocation.pdf");
+  assert.equal(posts[0].files[0].mimeType, "application/pdf");
 });
 
 test("a missing communication API is not enabled", async () => {

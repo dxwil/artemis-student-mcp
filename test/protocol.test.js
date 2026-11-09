@@ -115,6 +115,7 @@ test("stdio handshake lists only list_courses and returns normalized courses", a
   const { initialized, tools } = await handshake(client);
   assert.equal(initialized.result.protocolVersion, "2025-06-18");
   assert.equal(initialized.result.serverInfo.name, "artemis-student");
+  assert.deepEqual(initialized.result.capabilities.resources, { subscribe: false, listChanged: false });
   assert.deepEqual(
     tools.result.tools.map((tool) => tool.name),
     ["get_account", "list_courses", "list_exercises", "get_exercise", "list_lectures", "get_lecture", "list_announcements", "list_results", "get_feedback", "list_calendar", "list_exams", "get_exam_result", "list_conversations", "list_messages", "download_file", "download_attachment",
@@ -353,12 +354,18 @@ test("every student read answers over tools/call and stays on GET", async () => 
     assert.equal(JSON.stringify(body).includes("secret-faq"), false, name);
     assert.equal(JSON.stringify(body).includes("hidden-text"), false, name);
   }
+  const read = await client.request({
+    jsonrpc: "2.0",
+    id: "read-slides",
+    method: "resources/read",
+    params: { uri: "artemis://files/attachments/attachment-video-units/1/student/slides.pdf" },
+  });
+  assert.equal(Buffer.from(read.result.contents[0].blob, "base64").toString("utf8"), "pdf-bytes");
+  assert.equal(fs.existsSync(path.join(directory, "downloads")), false);
   const finished = await client.close();
   const recorded = JSON.parse(fs.readFileSync(trace, "utf8"));
   assert.equal(recorded.every((call) => call.method === "GET"), true);
   assert.equal(recorded.some((call) => /mark-as-read|completion|own-student-exam|status|seen|archive/.test(call.path)), false);
-  const savedName = fs.readdirSync(path.join(directory, "downloads", "4")).find((name) => name.endsWith("-slides.pdf"));
-  assert.equal(fs.readFileSync(path.join(directory, "downloads", "4", savedName), "utf8"), "pdf-bytes");
   assert.equal(finished.code, 0);
 });
 
