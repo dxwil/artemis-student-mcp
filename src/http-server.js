@@ -1,10 +1,11 @@
 import crypto from "node:crypto";
 import http from "node:http";
-import { envForAccount, ensureStateDir, resolveStateDir, verifyBearer } from "./access.js";
+import { envForAccount, ensureStateDir, resolveStateDir } from "./access.js";
 import { SafeError } from "./errors.js";
 import { MAX_BYTES } from "./http.js";
 import { createToolImpl } from "./impl.js";
 import { createMcpHandler, SUPPORTED_PROTOCOL_VERSIONS } from "./mcp.js";
+import { authenticateBearer, createOAuthRuntime, oauthSessionLive, revokeOAuthGrant, routeOAuth, wwwAuthenticate } from "./oauth.js";
 
 export { MAX_BYTES as MAX_HTTP_BODY_BYTES };
 export const DEFAULT_AUTH_FAILURE_LIMIT = 30;
@@ -12,7 +13,17 @@ export const DEFAULT_AUTH_FAILURE_WINDOW_MS = 5 * 60 * 1000;
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_LIMIT = 200;
-const KNOWN_PATHS = new Set(["/mcp", "/healthz"]);
+const KNOWN_PATHS = new Set([
+  "/mcp",
+  "/healthz",
+  "/authorize",
+  "/token",
+  "/register",
+  "/revoke",
+  "/.well-known/oauth-protected-resource",
+  "/.well-known/oauth-protected-resource/mcp",
+  "/.well-known/oauth-authorization-server",
+]);
 
 export function loadHttpConfig(env, overrides = {}) {
   const host = parseHost(overrides.host ?? envString(env, "ARTEMIS_MCP_HOST") ?? "127.0.0.1");
@@ -55,8 +66,9 @@ export async function startHttpServer(options = {}) {
   const sessions = new Map();
   const tails = new Map();
   const limiter = createLimiter(config.authFailureLimit, config.authFailureWindowMs);
+  const oauth = createOAuthRuntime(options);
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, { config, sessions, tails, limiter, server }).catch(() => {
+    handleRequest(req, res, { config, sessions, tails, limiter, oauth, server }).catch(() => {
       if (!res.headersSent) {
         try {
           finish(req, res, 500, { error: "internal" }, { close: true });
@@ -105,7 +117,7 @@ async function handleRequest(req, res, ctx) {
     reply(413, { error: "payload_too_large" }, { close: true });
     return;
   }
-  if (url.search) {
+  if (url.search && pathname !== "/authorize") {
     if (overAuthLimit(req, limiter, reply)) {
       return;
     }
@@ -121,23 +133,55 @@ async function handleRequest(req, res, ctx) {
     reply(200, { ok: true });
     return;
   }
+  if (
+    await routeOAuth({
+      req,
+      res,
+      url,
+      pathname,
+      config,
+      boundPort,
+      fetchImpl: config.fetchImpl,
+      oauth: ctx.oauth,
+      clientAddress: clientKey(req),
+      logStatus: (status) => config.log(`${status} ${safePath}\n`),
+    })
+  ) {
+    return;
+  }
   if (pathname !== "/mcp") {
     req.resume();
     reply(404, { error: "not_found" }, { close: true });
     return;
   }
 
-  const verdict = verifyBearer(config.stateDir, bearerToken(req.headers.authorization));
+  const verdict = authenticateBearer(config.stateDir, bearerToken(req.headers.authorization));
   if (!verdict.account) {
     if (verdict.revokedUserId) {
       dropUser(sessions, verdict.revokedUserId);
     }
+    if (verdict.known) {
+      reply(401, { error: "invalid_token" }, {
+        close: true,
+        headers: { "WWW-Authenticate": wwwAuthenticate(config, boundPort, "invalid_token") },
+      });
+      return;
+    }
     if (!overAuthLimit(req, limiter, reply)) {
       reply(401, { error: "unauthorized" }, {
         close: true,
-        headers: { "WWW-Authenticate": 'Bearer realm="artemis-student-mcp"' },
+        headers: { "WWW-Authenticate": wwwAuthenticate(config, boundPort) },
       });
     }
+    return;
+  }
+  if (verdict.account.kind === "oauth" && !oauthSessionLive(config.env, config.stateDir, verdict.account.userId)) {
+    revokeOAuthGrant(config.stateDir, verdict.account.grantId);
+    dropUser(sessions, verdict.account.userId);
+    reply(401, { error: "invalid_token" }, {
+      close: true,
+      headers: { "WWW-Authenticate": wwwAuthenticate(config, boundPort, "invalid_token") },
+    });
     return;
   }
 
@@ -227,6 +271,15 @@ async function handleRequest(req, res, ctx) {
   }
   if (!response) {
     reply(202, null, { sessionId: session.id });
+    return;
+  }
+  if (verdict.account.kind === "oauth" && toolErrorCode(response) === "unauthorized") {
+    revokeOAuthGrant(config.stateDir, verdict.account.grantId);
+    dropUser(sessions, verdict.account.userId);
+    reply(401, { error: "invalid_token" }, {
+      close: true,
+      headers: { "WWW-Authenticate": wwwAuthenticate(config, boundPort, "invalid_token") },
+    });
     return;
   }
   sendRpc(res, reply, response, session.id, accept);
@@ -555,6 +608,22 @@ function supportedProtocolHeader(value) {
     return true;
   }
   return typeof value === "string" && SUPPORTED_PROTOCOL_VERSIONS.includes(value);
+}
+
+function toolErrorCode(response) {
+  if (!response?.result?.isError) {
+    return null;
+  }
+  const text = response.result.content?.[0]?.text;
+  if (typeof text !== "string") {
+    return null;
+  }
+  try {
+    const body = JSON.parse(text);
+    return typeof body.error === "string" ? body.error : null;
+  } catch {
+    return null;
+  }
 }
 
 function rpcError(id, code, message) {
