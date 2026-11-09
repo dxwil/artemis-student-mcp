@@ -1,6 +1,6 @@
 import { asSafe, SafeError } from "./errors.js";
 
-const SUPPORTED_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18"];
+export const SUPPORTED_PROTOCOL_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18"];
 const SERVER_VERSION = "0.1.0";
 
 const COURSE_SCHEMA = {
@@ -363,7 +363,7 @@ export function createMcpHandler(impl) {
       }
       if (message.method === "initialize") {
         const requested = message.params?.protocolVersion;
-        const protocolVersion = SUPPORTED_VERSIONS.includes(requested) ? requested : SUPPORTED_VERSIONS.at(-1);
+        const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.includes(requested) ? requested : SUPPORTED_PROTOCOL_VERSIONS.at(-1);
         initialized = true;
         return result(id ?? null, {
           protocolVersion,

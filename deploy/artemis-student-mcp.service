@@ -1,0 +1,41 @@
+[Unit]
+Description=Artemis student MCP server
+Documentation=file:///opt/artemis-student-mcp/docs/self-hosting.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=artemis-mcp
+Group=artemis-mcp
+WorkingDirectory=/opt/artemis-student-mcp
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=ARTEMIS_MCP_STATE_DIR=/var/lib/artemis-student-mcp
+EnvironmentFile=/etc/artemis-student-mcp.env
+ExecStart=/opt/artemis-student-mcp/bin/artemis-student-mcp --http
+StateDirectory=artemis-student-mcp
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
