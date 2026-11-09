@@ -1,0 +1,12 @@
+node_modules/
+agent-tools/
+.env
+.env.*
+session.json
+**/session.json
+*.log
+downloads/
+PLUGIN_DATA/
+*.tgz
+.DS_Store
+coverage/

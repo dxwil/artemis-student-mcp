@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "artemis-student",
+  "version": "0.1.0",
+  "description": "Unofficial Artemis student tools for any Artemis server, including TUM. Reads course work and previews every write before it is sent.",
+  "author": {
+    "name": "dxwil"
+  },
+  "homepage": "https://github.com/dxwil/artemis-student-mcp",
+  "repository": "https://github.com/dxwil/artemis-student-mcp",
+  "license": "MIT",
+  "keywords": ["artemis", "student", "courses", "mcp"]
+}

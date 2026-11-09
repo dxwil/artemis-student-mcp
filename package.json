@@ -1,0 +1,20 @@
+{
+  "name": "artemis-student",
+  "version": "0.1.0",
+  "description": "Unofficial Artemis student tools for any Artemis server, including TUM. Reads course work and previews every write before it is sent.",
+  "license": "MIT",
+  "author": "dxwil",
+  "homepage": "https://github.com/dxwil/artemis-student-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dxwil/artemis-student-mcp"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  }
+}

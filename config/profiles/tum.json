@@ -1,0 +1,4 @@
+{
+  "origin": "https://artemis.tum.de",
+  "note": "Deployment profile only. Public management info on 2026-11-09 listed the ldap module feature and an OIDC button labeled TUM Login. Sign-in still follows the live login-options and management info responses."
+}

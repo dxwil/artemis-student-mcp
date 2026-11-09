@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "artemis-student": {
+      "command": "./bin/artemis-student-mcp",
+      "args": [],
+      "cwd": "${CURSOR_PLUGIN_ROOT}"
+    }
+  }
+}
