@@ -9,5 +9,6 @@
   "repository": "https://github.com/dxwil/artemis-student-mcp",
   "license": "MIT",
   "keywords": ["artemis", "student", "courses", "mcp"],
+  "logo": "assets/artemis-logo.png",
   "mcpServers": "./cursor-mcp.json"
 }

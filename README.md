@@ -4,7 +4,7 @@ Model Context Protocol plugin for one Artemis student. It talks to a normal Arte
 
 It does not grade, and it does not submit programming, modeling, or exam exercises.
 
-This is an unofficial community plugin. It is not affiliated with, endorsed by, or maintained by the [Artemis](https://github.com/ls1intum/Artemis) team or the Technical University of Munich.
+This is an unofficial community plugin. It is not affiliated with, endorsed by, or maintained by the [Artemis](https://github.com/ls1intum/Artemis) team or the Technical University of Munich. The mark in `assets/artemis-logo.png` is the Artemis project's logo. It belongs to the Artemis project.
 
 A live TUM student session is not part of the automated tests. Those tests use an in-process mock of the Artemis HTTP API. They do not log in to https://artemis.tum.de.
 
