@@ -10,7 +10,7 @@ import { getFeedback, listResults } from "./results.js";
 import { getExercise, getLecture, listExercises, listLectures } from "./student-reads.js";
 import { submitFile, submitQuiz, submitText } from "./submissions.js";
 
-export function createToolImpl(env, fetchImpl = globalThis.fetch) {
+export function createToolImpl(env, fetchImpl = globalThis.fetch, hooks = {}) {
   return {
     listCourses: () => listCourses(env, fetchImpl),
     listExercises: (courseId) => listExercises(env, courseId, fetchImpl),
@@ -25,7 +25,7 @@ export function createToolImpl(env, fetchImpl = globalThis.fetch) {
     getExamResult: (courseId, examId, studentExamId) => getExamResult(env, courseId, examId, studentExamId, fetchImpl),
     listConversations: (courseId) => listConversations(env, courseId, fetchImpl),
     listMessages: (courseId, conversationId, page) => listMessages(env, courseId, conversationId, page, fetchImpl),
-    downloadAttachment: (lectureId, filePath) => downloadAttachment(env, lectureId, filePath, fetchImpl),
+    downloadAttachment: (lectureId, unitId, attachmentId) => downloadAttachment(env, lectureId, { unitId, attachmentId }, fetchImpl, Date.now(), hooks),
     listTutorialGroups: (courseId) => listTutorialGroups(env, courseId, fetchImpl),
     listCompetencies: (courseId) => listCompetencies(env, courseId, fetchImpl),
     getLearningPath: (courseId) => getLearningPath(env, courseId, fetchImpl),

@@ -88,9 +88,9 @@ export async function main(argv = process.argv.slice(2), env = process.env, fetc
       return 0;
     }
     if (command === "download") {
-      const parsed = parseIdAndText(argv.slice(1), "download <lectureId> <path>");
+      const parsed = parseDownload(argv.slice(1));
       requireSession(env);
-      const body = await callToolOverMcp(env, "download_attachment", { lectureId: parsed.id, path: parsed.text });
+      const body = await callToolOverMcp(env, "download_attachment", { lectureId: parsed.lectureId, unitId: parsed.unitId, attachmentId: parsed.attachmentId });
       process.stdout.write(`downloaded: ${body.download.bytes}\n`);
       if (parsed.show) {
         process.stdout.write(`${JSON.stringify(body.download)}\n`);
@@ -285,6 +285,18 @@ function requireSession(env) {
       "Set PLUGIN_DATA or ARTEMIS_TOKEN_FILE to a private directory outside the plugin before reading.",
     );
   }
+}
+
+function parseDownload(args) {
+  const usage = "download <lectureId> (--unit <id>|--attachment <id>)";
+  const lectureId = requireCliId(args[0], usage);
+  if (args[1] === "--unit" && args.length === 3) {
+    return { lectureId, unitId: requireCliId(args[2], usage) };
+  }
+  if (args[1] === "--attachment" && args.length === 3) {
+    return { lectureId, attachmentId: requireCliId(args[2], usage) };
+  }
+  throw new SafeError("usage", `Usage: artemis-student-auth ${usage}`);
 }
 
 function parseIdAndText(args, usage) {

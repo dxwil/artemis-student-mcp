@@ -334,7 +334,7 @@ test("every student read answers over tools/call and stays on GET", async () => 
     ["get_exam_result", { courseId: 7, examId: 5, studentExamId: 6 }, "examResult"],
     ["list_conversations", { courseId: 7 }, "conversations"],
     ["list_messages", { courseId: 7, conversationId: 9, page: 0 }, "messages"],
-    ["download_attachment", { lectureId: 4, path: "/api/core/files/attachments/lectures/4/slides.pdf" }, "download"],
+    ["download_attachment", { lectureId: 4, unitId: 1 }, "download"],
     ["list_tutorial_groups", { courseId: 7 }, "tutorialGroups"],
     ["list_competencies", { courseId: 7 }, "competencies"],
     ["get_learning_path", { courseId: 7 }, "learningPath"],
@@ -356,7 +356,8 @@ test("every student read answers over tools/call and stays on GET", async () => 
   const recorded = JSON.parse(fs.readFileSync(trace, "utf8"));
   assert.equal(recorded.every((call) => call.method === "GET"), true);
   assert.equal(recorded.some((call) => /mark-as-read|completion|own-student-exam|status|seen|archive/.test(call.path)), false);
-  assert.equal(fs.readFileSync(path.join(directory, "downloads", "4", "slides.pdf"), "utf8"), "pdf-bytes");
+  const savedName = fs.readdirSync(path.join(directory, "downloads", "4")).find((name) => name.endsWith("-slides.pdf"));
+  assert.equal(fs.readFileSync(path.join(directory, "downloads", "4", savedName), "utf8"), "pdf-bytes");
   assert.equal(finished.code, 0);
 });
 

@@ -114,7 +114,7 @@ Reads take no confirmation. Writes are listed in the next section.
 | `get_exam_result` | Released grade summary for `courseId`, `examId`, and `studentExamId`. |
 | `list_conversations` | Conversation titles in `courseId`. |
 | `list_messages` | One page of posts in `courseId` and `conversationId`. |
-| `download_attachment` | One same-origin lecture attachment path from `get_lecture`, saved under `PLUGIN_DATA`. |
+| `download_attachment` | One student-visible attachment identified by `lectureId` and `unitId` or `attachmentId` from `get_lecture`. Stdio returns an absolute path. HTTP returns the bytes and a short-lived download URL. |
 | `list_tutorial_groups` | Tutorial groups for `courseId`. |
 | `list_competencies` | Course competencies, or `not_enabled` when Atlas is off. |
 | `get_learning_path` | The student's learning-path progress. |

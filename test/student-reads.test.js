@@ -111,22 +111,46 @@ test("lecture materials keep safe references and omit hidden units", async () =>
       isTutorialLecture: false,
       course: { id: 7 },
       lectureUnits: [
-        { id: 1, type: "attachment", name: "Slides", visibleToStudents: true, attachment: { link: "/api/core/files/slides.pdf" } },
+        {
+          id: 1,
+          type: "attachment",
+          name: "Slides",
+          visibleToStudents: true,
+          attachment: {
+            id: 21,
+            name: "Slides",
+            link: "attachments/attachment-video-units/1/slides.pdf",
+            attachmentType: "FILE",
+            version: 2,
+            studentVersion: "attachments/attachment-video-units/1/student/slides.pdf",
+          },
+        },
         { id: 2, type: "online", name: "Video", visibleToStudents: true, source: "https://cdn.example/video" },
         { id: 3, type: "text", name: "Notes", visibleToStudents: true, content: "Read this" },
         { id: 5, type: "exercise", name: "Task", visibleToStudents: true, exercise: { id: 11, type: "TEXT", title: "Essay", studentParticipations: [{ score: 1 }] } },
-        { id: 6, type: "attachment", name: "Draft", visibleToStudents: false, attachment: { link: "/api/core/files/draft.pdf" } },
+        { id: 6, type: "attachment", name: "Draft", visibleToStudents: false, attachment: { id: 22, link: "attachments/attachment-video-units/6/draft.pdf" } },
+      ],
+      attachments: [
+        { id: 30, name: "Syllabus", link: "attachments/lectures/4/syllabus.pdf", attachmentType: "FILE", releaseDate: "2020-01-01T00:00:00Z" },
+        { id: 31, name: "Later", link: "attachments/lectures/4/later.pdf", releaseDate: "2999-01-01T00:00:00Z" },
       ],
     },
     7,
     "https://artemis.test",
   );
-  assert.equal(lecture.materials.length, 4);
-  assert.equal(lecture.materials[0].path, "/api/core/files/slides.pdf");
+  assert.equal(lecture.materials.length, 5);
+  assert.equal(lecture.materials[0].path, "/api/core/files/attachments/attachment-video-units/1/student/slides.pdf");
+  assert.equal(lecture.materials[0].attachmentId, 21);
+  assert.equal(lecture.materials[0].filename, "slides.pdf");
+  assert.equal(lecture.materials[0].attachmentType, "FILE");
+  assert.equal(lecture.materials[0].version, 2);
   assert.equal(lecture.materials[1].url, "https://cdn.example/video");
   assert.equal(lecture.materials[2].text, "Read this");
   assert.equal(lecture.materials[3].exerciseId, 11);
+  assert.equal(lecture.materials[4].kind, "lecture-attachment");
+  assert.equal(lecture.materials[4].path, "/api/core/files/attachments/lectures/4/syllabus.pdf");
   assert.equal(JSON.stringify(lecture).includes("draft.pdf"), false);
+  assert.equal(JSON.stringify(lecture).includes("later.pdf"), false);
   assert.equal(JSON.stringify(lecture).includes("score"), false);
 });
 
